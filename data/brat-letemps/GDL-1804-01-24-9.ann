@@ -1,0 +1,40 @@
+T1	loc_adm_town 25 34	Bruxelles
+T2	loc_adm_town 63 75	Berg-op-Zoom
+T3	loc_adm_nat 203 210	Zélande
+T4	loc_adm_town 274 281	Hanovre
+T5	loc_adm_town 343 350	Hanovre
+T6	loc_adm_town 703 713	Saint-Omer
+T7	loc_adm_town 1138 1143	Havre
+T8	pers_ind 1560 1567	Pie VII
+T9	loc_adm_town 1614 1619	Paris
+T10	loc_adm_town 3405 3410	Milan
+T11	loc_adm_town 3497 3506	Marseille
+T12	loc_adm_town 3589 3597	Florence
+T13	pers_ind 3556 3572	Lucien Bonaparte
+T14	loc_adm_town 3652 3656	Mans
+T15	pers_ind 3882 3887	Murât
+T16	loc_adm_nat 4033 4043	Angleterre
+T17	pers_ind 4060 4066	Noguès
+T18	pers_ind 3759 3773	Pierre Batteau
+T19	loc_adm_town 3912 3917	Paris
+T20	pers_ind 4353 4356;4357 4364	MM. Windham
+T21	pers_ind 4366 4374	Melville
+T22	pers_ind 4377 4381	Pitt
+T23	loc_adm_town 4412 4418	Venise
+T24	loc_adm_town 4424 4429	Gênes
+T25	loc_admin_sup 4501 4507	Europe
+T26	loc_adm_reg 4546 4552	Galles
+T27	pers_ind 4589 4595	M. Fox
+T28	loc_adm_nat 5182 5192	Angleterre
+T29	loc_admin_sup 5228 5234	Europe
+T30	loc_adm_reg 5387 5393	Galles
+T31	loc_adm_nat 5435 5445	Angleterre
+T32	loc_adm_nat 5608 5617	Angletere
+T33	pers_coll 5065 5069	Pitt
+T34	pers_coll 5075 5081	Temple
+T35	loc_adm_town 5887 5897	Birmingham
+T36	loc_adm_town 5901 5911	Manchester
+T37	loc_adm_town 5913 5922	Sheffisld
+T38	loc_adm_town 5925 5934	Conventry
+T39	loc_adm_nat 6313 6323	Angleterre
+T40	loc_adm_town 475 480	Paris
