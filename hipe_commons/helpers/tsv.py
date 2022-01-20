@@ -17,37 +17,11 @@ COL_LABELS = [
 
 ENTITY_TYPES = [
     "coarse_lit",
-    "coarse_meto"
+    "coarse_meto",
+    "fine_lit",
+    "fine_meto",
+    "fine_comp"
 ]
-
-class HipeDocument(object):  
-    def __init__(self, path, tsv_lines):
-        self.path = path
-        self._tsv_lines = tsv_lines
-        self.entities = {}
-        
-        self.metadata = {
-            line.field: line.value
-            for line in self._tsv_lines
-            if isinstance(line, TSVComment)
-        }
-        
-        for e_type in ENTITY_TYPES:
-            entities = lines2entities(self._tsv_lines, e_type)
-            if entities:
-                self.entities[e_type] = entities 
-
-class HipeEntity(object):  
-    def __init__(self, text, ne_type, ne_tag, wikidata_id, line_numbers):
-        self.text = text
-        self.type = ne_type
-        self.tag = ne_tag
-        self.wikidata_id = wikidata_id
-        self.line_numbers = line_numbers
-        
-    def __repr__(self):
-        return f"[{self.tag}/{self.type}] {self.text} ({self.wikidata_id}) [{self.line_numbers}]"
-
 
 class TSVComment(NamedTuple):
     n: int
@@ -79,9 +53,175 @@ class TSVAnnotation(NamedTuple):
             f"{self.nel_lit}\t{self.nel_meto}\t{self.misc}"
         )
 
-
 TSVLine = Union[TSVAnnotation, TSVComment]
 
+class HipeEntity(object):  
+    def __init__(self, text, ne_type, ne_tag, wikidata_id, line_numbers):
+        self.text = text
+        self.type = ne_type
+        self.tag = ne_tag
+        self.wikidata_id = wikidata_id
+        self.line_numbers = line_numbers
+        
+    def __repr__(self):
+        return f"[{self.tag}] {self.text} ({self.wikidata_id})"
+
+class HipeDocument(object):  
+    def __init__(self, path, tsv_lines):
+        self.path = path
+        self._tsv_lines = tsv_lines
+        self.entities = {}
+        
+        self.metadata = {
+            line.field: line.value
+            for line in self._tsv_lines
+            if isinstance(line, TSVComment)
+        }
+        
+        for e_type in ENTITY_TYPES:
+            entities = self._lines2entities(e_type)
+            if entities:
+                self.entities[e_type] = entities 
+
+    def _lines2entities(self, entity_type: str) -> List[HipeEntity]:
+        entities = []
+        line_groups = []
+        current_entity_lines = [] 
+        
+        # 1) identify group of lines, each group corresponding to one entity
+        for line in self._tsv_lines:
+            if isinstance(line, TSVComment):
+                continue
+                
+            # depending on the entity type, the NE tag is found in a diff TSV column
+            if entity_type == "coarse_lit":
+                ne_tag = line.ne_coarse_lit
+            elif entity_type == "coarse_meto":
+                ne_tag = line.ne_coarse_meto
+            elif entity_type == "fine_lit":
+                ne_tag = line.ne_fine_lit
+            elif entity_type == "fine_meto":
+                ne_tag = line.ne_fine_meto
+            elif entity_type == "fine_comp":
+                ne_tag = line.ne_fine_comp
+            else:
+                ne_tag = None
+                
+            if ne_tag:
+                # beginning of a new entity
+                if ne_tag.startswith('B-'):
+                    
+                    # case of two consecutive B-* tags
+                    if current_entity_lines:
+                        line_groups.append(current_entity_lines)
+                        current_entity_lines = []
+
+                    current_entity_lines.append(line)
+                
+                # continuation of an entity
+                elif ne_tag.startswith('I-'):
+                    current_entity_lines.append(line)
+                
+                # O tag
+                else:
+                    if current_entity_lines:
+                        line_groups.append(current_entity_lines)
+                        current_entity_lines = []
+
+        # 2) parse line groups into HipeEntity class instances                
+        for group in line_groups:
+            entities.append(lines2entity(group, entity_type))
+        
+        return entities
+
+# TODO: finish implementation of this function
+def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity: 
+    """Converts a group of TSV lines into a `HipeEntity` object.
+
+    :param tsv_lines: List of TSV lines corresponding to a token-based representation of an entity.
+    :type tsv_lines: List[TSVLine]
+    :param entity_type: The type of entities to select.
+    :type entity_type: str
+    :return: Returns a list of `HipeEntity` objects.
+    :rtype: HipeEntity
+    """
+
+    # reconstruct the entity surface form from its tokens;
+    # white space insertion is controlled via the `NoSpaceAfterFlag`
+    # contained in the `Misc` column of the TSV file
+    surface_form = ""
+    for line in tsv_lines:
+        surface_form += line.token
+        if not "NoSpaceAfter" in line.misc:
+            surface_form += " "
+            
+    # keep track of the TSV line numbers over which the entity spans.
+    # this information can be useful mostly for diagnostics and debugging.
+    line_numbers = [
+        line.n + 1
+        for line in tsv_lines
+    ]
+    
+    # the NE tag and NE link information is contained in different columns
+    # depending on the selected entity_type 
+    if entity_type == "coarse_lit":
+        ne_tag = [
+            line.ne_coarse_lit.split('-')[1]
+            for line in tsv_lines
+        ]
+        
+        ne_link = [
+            line.nel_lit
+            for line in tsv_lines
+        ]
+    elif entity_type == "coarse_meto":
+        ne_tag = [
+            line.ne_coarse_meto.split('-')[1]
+            for line in tsv_lines
+        ]
+        
+        ne_link = [
+            line.nel_meto
+            for line in tsv_lines
+        ]
+    elif entity_type == "fine_lit":
+        ne_tag = [
+            line.ne_fine_lit.split('-')[1]
+            for line in tsv_lines
+        ]
+        
+        ne_link = [
+            line.nel_lit
+            for line in tsv_lines
+        ]
+    elif entity_type == "fine_meto":
+        ne_tag = [
+            line.ne_fine_meto.split('-')[1]
+            for line in tsv_lines
+        ]
+        
+        ne_link = [
+            line.nel_meto
+            for line in tsv_lines
+        ]
+    elif entity_type == "fine_comp":
+        ne_tag = [
+            line.ne_fine_comp.split('-')[1]
+            for line in tsv_lines
+        ]
+        
+        # entity components don't come with EL info
+        ne_link = None
+    elif entity_type == "nested":
+        pass
+    
+    # if the NE link is absent, replace it with `None`
+    if ne_link:
+        ne_link = ne_link[0] if ne_link[0] != "_" else None
+    
+    if ne_tag:
+        # now we can build and return the entity object
+        return HipeEntity(surface_form, entity_type, ne_tag[0], ne_link, line_numbers)
 
 def find_datasets_files(base_dir: str) -> List[str]:
     """Finds recursively TSV file in a folder.
@@ -294,119 +434,3 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
 
     with io.open(output_path, "w", encoding="utf-8") as f:
         f.write(csv_content)
-
-#############################
-# NEW CLASSES & FUNCTIONS   #
-#############################
-
-# TODO: finish implementation of this function
-def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity: 
-    """Converts a group of TSV lines into a `HipeEntity` object.
-
-    :param tsv_lines: List of TSV lines corresponding to a token-based representation of an entity.
-    :type tsv_lines: List[TSVLine]
-    :param entity_type: The type of entities to select.
-    :type entity_type: str
-    :return: Returns a list of `HipeEntity` objects.
-    :rtype: HipeEntity
-    """
-
-    # reconstruct the entity surface form from its tokens;
-    # white space insertion is controlled via the `NoSpaceAfterFlag`
-    # contained in the `Misc` column of the TSV file
-    surface_form = ""
-    for line in tsv_lines:
-        surface_form += line.token
-        if not "NoSpaceAfter" in line.misc:
-            surface_form += " "
-            
-    # keep track of the TSV line numbers over which the entity spans.
-    # this information can be useful mostly for diagnostics and debugging.
-    line_numbers = [
-        line.n + 1
-        for line in tsv_lines
-    ]
-    
-    # the NE tag and NE link information is contained in different columns
-    # depending on the selected entity_type 
-    if entity_type == "coarse_lit":
-        ne_tag = [
-            line.ne_coarse_lit.split('-')[1]
-            for line in tsv_lines
-        ]
-        
-        ne_link = [
-            line.nel_lit
-            for line in tsv_lines
-        ]
-    elif entity_type == "coarse_meto":
-        ne_tag = [
-            line.ne_coarse_meto.split('-')[1]
-            for line in tsv_lines
-        ]
-        
-        ne_link = [
-            line.nel_meto
-            for line in tsv_lines
-        ]
-    elif entity_type == "fine_lit":
-        pass
-    elif entity_type == "fine_meto":
-        pass
-    elif entity_type == "fine_comp":
-        pass
-    elif entity_type == "nested":
-        pass
-    
-    # is the NE link is absent, replace it with `None`
-    ne_link = ne_link[0] if ne_link[0] != "_" else None
-    
-    if ne_tag:
-        # now we can build and return the entity object
-        return HipeEntity(surface_form, entity_type, ne_tag[0], ne_link, line_numbers)
-
-
-def lines2entities(tsv_lines: List[TSVLine], entity_type: str) -> List[HipeEntity]:
-        entities = []
-        line_groups = []
-        current_entity_lines = [] 
-        
-        # 1) identify group of lines, each group corresponding to one entity
-        for line in tsv_lines:
-            if isinstance(line, TSVComment):
-                continue
-                
-            
-            if entity_type == "coarse_lit":
-                ne_tag = line.ne_coarse_lit
-            elif entity_type == "coarse_meto":
-                ne_tag = line.ne_coarse_meto
-            else:
-                ne_tag = None
-                
-            if ne_tag:
-                # beginning of a new entity
-                if ne_tag.startswith('B-'):
-                    
-                    # case of two consecutive B-* tags
-                    if current_entity_lines:
-                        line_groups.append(current_entity_lines)
-                        current_entity_lines = []
-
-                    current_entity_lines.append(line)
-                
-                # continuation of an entity
-                elif ne_tag.startswith('I-'):
-                    current_entity_lines.append(line)
-                
-                # O tag
-                else:
-                    if current_entity_lines:
-                        line_groups.append(current_entity_lines)
-                        current_entity_lines = []
-
-        # 2) parse line groups into HipeEntity class instances                
-        for group in line_groups:
-            entities.append(lines2entity(group, entity_type))
-        
-        return entities
