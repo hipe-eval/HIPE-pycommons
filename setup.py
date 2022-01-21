@@ -18,7 +18,10 @@ setup(
     ],
     license="GPL v3"
     ,
-    install_requires=[],
+    install_requires=[
+        "pandas",
+        "tabulate"
+    ],
     long_description=read("README.md"),
     long_description_content_type='text/markdown'
 )
