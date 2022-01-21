@@ -1,5 +1,6 @@
 import os
 import io
+import urllib.request
 from typing import Set, List, Union, NamedTuple
 
 COL_LABELS = [
@@ -20,7 +21,8 @@ ENTITY_TYPES = [
     "coarse_meto",
     "fine_lit",
     "fine_meto",
-    "fine_comp"
+    "fine_comp",
+    "nested"
 ]
 
 class TSVComment(NamedTuple):
@@ -71,6 +73,12 @@ class HipeDocument(object):
         self.path = path
         self._tsv_lines = tsv_lines
         self.entities = {}
+
+        self.n_tokens = sum([
+            1
+            for line in self._tsv_lines
+            if not isinstance(line, TSVComment)
+        ])
         
         self.metadata = {
             line.field: line.value
@@ -84,6 +92,13 @@ class HipeDocument(object):
                 self.entities[e_type] = entities 
 
     def _lines2entities(self, entity_type: str) -> List[HipeEntity]:
+        """Parse a token-based entity representation into a `HipeEntity` object.
+
+        :param entity_type: The entity type to consider (any of the values in `ENTITY_TYPES`)
+        :type entity_type: str
+        :return: A list of `HipeEntity` objects.
+        :rtype: List[HipeEntity]
+        """        
         entities = []
         line_groups = []
         current_entity_lines = [] 
@@ -104,6 +119,8 @@ class HipeDocument(object):
                 ne_tag = line.ne_fine_meto
             elif entity_type == "fine_comp":
                 ne_tag = line.ne_fine_comp
+            elif entity_type == "nested":
+                ne_tag = line.ne_nested
             else:
                 ne_tag = None
                 
@@ -127,6 +144,9 @@ class HipeDocument(object):
                     if current_entity_lines:
                         line_groups.append(current_entity_lines)
                         current_entity_lines = []
+
+        if current_entity_lines:
+            line_groups.append(current_entity_lines)
 
         # 2) parse line groups into HipeEntity class instances                
         for group in line_groups:
@@ -213,7 +233,13 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
         # entity components don't come with EL info
         ne_link = None
     elif entity_type == "nested":
-        pass
+        ne_tag = [
+            line.ne_nested.split('-')[1]
+            for line in tsv_lines
+        ]
+        
+        # entity components don't come with EL info
+        ne_link = None
     
     # if the NE link is absent, replace it with `None`
     if ne_link:
@@ -345,11 +371,23 @@ def parse_annotation(line: str, line_number: int) -> TSVAnnotation:
 
 
 def parse_tsv(
-    file_path: str, mask_nerc: bool = False, mask_nel: bool = False
+    mask_nerc: bool = False, mask_nel: bool = False, **kwargs
 ) -> List[HipeDocument]:
 
-    with open(file_path) as f:
-        documents = [
+    if "file_url" in kwargs:
+        file_path = kwargs['file_url']
+        response = urllib.request.urlopen(file_path)
+        tsv_data = response.read().decode('utf-8')
+
+    elif "file_path" in kwargs:
+        file_path = kwargs['file_path']
+        with open(file_path) as f:
+            tsv_data = f.read()
+
+    else:
+        raise
+
+    documents = [
             HipeDocument(
                 path=file_path,
                 tsv_lines = [
@@ -358,7 +396,7 @@ def parse_tsv(
                     if not line.startswith("TOKEN") and line != ""
                 ]
             )
-            for document in f.read().split("\n\n")
+            for document in tsv_data.split("\n\n")
         ]
     return documents
 
