@@ -25,6 +25,14 @@ ENTITY_TYPES = [
     "nested"
 ]
 
+PARTIAL_FLAG = "Partial"
+NO_SPACE_AFTER_FLAG = "NoSpaceAfter"
+END_OF_LINE_FLAG = "EndOfLine"
+END_OF_SENTENCE_FLAG = "EndOfSentence"
+NIL_FLAG = "NIL"
+BLANK_LINE_FLAG = "BLANK_LINE"
+
+
 class TSVComment(NamedTuple):
     n: int
     field: str
