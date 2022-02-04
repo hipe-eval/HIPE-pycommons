@@ -465,10 +465,11 @@ def mask_nel_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
 def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
     headers = COL_LABELS
     raw_csv = "\n\n".join(
-        ["\n".join([str(line) for line in document]) for document in documents]
+        ("\n".join((str(line) for line in document)) for document in documents)
     )
     headers_line = "\t".join(headers)
-    csv_content = f"{headers_line}\n{raw_csv}"
+    csv_content = f"{headers_line}\n{raw_csv}\n"
 
     with io.open(output_path, "w", encoding="utf-8") as f:
         f.write(csv_content)
+  
