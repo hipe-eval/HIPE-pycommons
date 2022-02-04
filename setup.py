@@ -9,7 +9,7 @@ def read(fname):
 setup(
     name="hipe_commons",
     url="https://github.com/hipe-eval/HIPE-pycommons",
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(),
     classifiers=[
         "Intended Audience :: Science/Research",
