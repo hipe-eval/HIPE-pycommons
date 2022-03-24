@@ -20,7 +20,8 @@ setup(
     ,
     install_requires=[
         "pandas",
-        "tabulate"
+        "tabulate",
+        "stringdist"
     ],
     long_description=read("README.md"),
     long_description_content_type='text/markdown'
