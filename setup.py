@@ -9,7 +9,11 @@ def read(fname):
 setup(
     name="hipe_commons",
     url="https://github.com/hipe-eval/HIPE-pycommons",
+<<<<<<< HEAD
     version="0.2.1",
+=======
+    version="0.1.0",
+>>>>>>> develop
     packages=find_packages(),
     classifiers=[
         "Intended Audience :: Science/Research",
@@ -24,4 +28,8 @@ setup(
     ],
     long_description=read("README.md"),
     long_description_content_type='text/markdown'
+<<<<<<< HEAD
 )
+=======
+)
+>>>>>>> develop
