@@ -24,7 +24,6 @@ ENTITY_TYPES = [
     "fine_comp",
     "nested"
 ]
-<<<<<<< HEAD
 
 PARTIAL_FLAG = "Partial"
 NO_SPACE_AFTER_FLAG = "NoSpaceAfter"
@@ -33,8 +32,6 @@ END_OF_SENTENCE_FLAG = "EndOfSentence"
 NIL_FLAG = "NIL"
 BLANK_LINE_FLAG = "BLANK_LINE"
 
-=======
->>>>>>> develop
 
 class TSVComment(NamedTuple):
     n: int
@@ -482,9 +479,5 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
     csv_content = f"{headers_line}\n{raw_csv}\n"
 
     with io.open(output_path, "w", encoding="utf-8") as f:
-<<<<<<< HEAD
         f.write(csv_content)
   
-=======
-        f.write(csv_content)
->>>>>>> develop
