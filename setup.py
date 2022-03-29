@@ -21,7 +21,8 @@ setup(
     install_requires=[
         "pandas",
         "tabulate",
-        "stringdist"
+        "stringdist",
+        "torch"
     ],
     long_description=read("README.md"),
     long_description_content_type='text/markdown'

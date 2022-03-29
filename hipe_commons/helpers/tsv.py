@@ -1,7 +1,13 @@
 import os
 import io
 import urllib.request
-from typing import Set, List, Union, NamedTuple
+from typing import Set, List, Union, NamedTuple, Tuple, Dict, Optional
+import pandas as pd
+import torch
+
+# ======================================================================================================================
+#                                                       VARIABLES
+# ======================================================================================================================
 
 COL_LABELS = [
     "TOKEN",
@@ -33,7 +39,14 @@ NIL_FLAG = "NIL"
 BLANK_LINE_FLAG = "BLANK_LINE"
 
 
+# ======================================================================================================================
+#                                                     CUSTOM TYPES AND OBJECTS
+# ======================================================================================================================
+
 class TSVComment(NamedTuple):
+    """Namedtuple representing a commented tsv-line.
+
+    ..note:: In the tsv, commented lines comply the following format: `# some_key = some_value`. """
     n: int
     field: str
     value: str
@@ -42,7 +55,11 @@ class TSVComment(NamedTuple):
         return f"# {self.field} = {self.value}"
 
 
+# TODO : @matteo @siclemat :
+#   The fact attributes in `TSVAnnotation` are in format `bla_foo_bar` instead of `BLA-FOO-BAR`
+#   can make the handling of the object less easy... Could we harmonize this ?
 class TSVAnnotation(NamedTuple):
+    """Namedtuple representing an ordinary tsv-line, containing annotations."""
     n: int
     token: str
     ne_coarse_lit: str
@@ -63,20 +80,23 @@ class TSVAnnotation(NamedTuple):
             f"{self.nel_lit}\t{self.nel_meto}\t{self.misc}"
         )
 
+
 TSVLine = Union[TSVAnnotation, TSVComment]
 
-class HipeEntity(object):  
+
+class HipeEntity(object):
     def __init__(self, text, ne_type, ne_tag, wikidata_id, line_numbers):
         self.text = text
         self.type = ne_type
         self.tag = ne_tag
         self.wikidata_id = wikidata_id
         self.line_numbers = line_numbers
-        
+
     def __repr__(self):
         return f"[{self.tag}] {self.text} ({self.wikidata_id})"
 
-class HipeDocument(object):  
+
+class HipeDocument(object):
     def __init__(self, path, tsv_lines):
         self.path = path
         self._tsv_lines = tsv_lines
@@ -87,17 +107,17 @@ class HipeDocument(object):
             for line in self._tsv_lines
             if not isinstance(line, TSVComment)
         ])
-        
+
         self.metadata = {
             line.field: line.value
             for line in self._tsv_lines
             if isinstance(line, TSVComment)
         }
-        
+
         for e_type in ENTITY_TYPES:
             entities = self._lines2entities(e_type)
             if entities:
-                self.entities[e_type] = entities 
+                self.entities[e_type] = entities
 
     def _lines2entities(self, entity_type: str) -> List[HipeEntity]:
         """Parse a token-based entity representation into a `HipeEntity` object.
@@ -106,16 +126,16 @@ class HipeDocument(object):
         :type entity_type: str
         :return: A list of `HipeEntity` objects.
         :rtype: List[HipeEntity]
-        """        
+        """
         entities = []
         line_groups = []
-        current_entity_lines = [] 
-        
+        current_entity_lines = []
+
         # 1) identify group of lines, each group corresponding to one entity
         for line in self._tsv_lines:
             if isinstance(line, TSVComment):
                 continue
-                
+
             # depending on the entity type, the NE tag is found in a diff TSV column
             if entity_type == "coarse_lit":
                 ne_tag = line.ne_coarse_lit
@@ -131,22 +151,22 @@ class HipeDocument(object):
                 ne_tag = line.ne_nested
             else:
                 ne_tag = None
-                
+
             if ne_tag:
                 # beginning of a new entity
                 if ne_tag.startswith('B-'):
-                    
+
                     # case of two consecutive B-* tags
                     if current_entity_lines:
                         line_groups.append(current_entity_lines)
                         current_entity_lines = []
 
                     current_entity_lines.append(line)
-                
+
                 # continuation of an entity
                 elif ne_tag.startswith('I-'):
                     current_entity_lines.append(line)
-                
+
                 # O tag
                 else:
                     if current_entity_lines:
@@ -159,11 +179,31 @@ class HipeDocument(object):
         # 2) parse line groups into HipeEntity class instances                
         for group in line_groups:
             entities.append(lines2entity(group, entity_type))
-        
+
         return entities
 
-# TODO: finish implementation of this function
-def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity: 
+
+class HipeDataset(torch.utils.data.Dataset):
+    """A custom class to make HIPE-data amenable to pytorch and transformers"""
+
+    def __init__(self, encodings: "BatchEncoding", labels: List[List[int]]):
+        self.encodings = encodings
+        self.labels = labels
+
+    def __getitem__(self, idx):
+        item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
+        item['labels'] = torch.tensor(self.labels[idx])
+        return item
+
+    def __len__(self):
+        return len(self.labels)
+
+
+# ======================================================================================================================
+#                                                       HELPER FUNCTIONS
+# ======================================================================================================================
+
+def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
     """Converts a group of TSV lines into a `HipeEntity` object.
 
     :param tsv_lines: List of TSV lines corresponding to a token-based representation of an entity.
@@ -182,14 +222,14 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
         surface_form += line.token
         if not "NoSpaceAfter" in line.misc:
             surface_form += " "
-            
+
     # keep track of the TSV line numbers over which the entity spans.
     # this information can be useful mostly for diagnostics and debugging.
     line_numbers = [
         line.n + 1
         for line in tsv_lines
     ]
-    
+
     # the NE tag and NE link information is contained in different columns
     # depending on the selected entity_type 
     if entity_type == "coarse_lit":
@@ -197,7 +237,7 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
             line.ne_coarse_lit.split('-')[1]
             for line in tsv_lines
         ]
-        
+
         ne_link = [
             line.nel_lit
             for line in tsv_lines
@@ -207,7 +247,7 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
             line.ne_coarse_meto.split('-')[1]
             for line in tsv_lines
         ]
-        
+
         ne_link = [
             line.nel_meto
             for line in tsv_lines
@@ -217,7 +257,7 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
             line.ne_fine_lit.split('-')[1]
             for line in tsv_lines
         ]
-        
+
         ne_link = [
             line.nel_lit
             for line in tsv_lines
@@ -227,7 +267,7 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
             line.ne_fine_meto.split('-')[1]
             for line in tsv_lines
         ]
-        
+
         ne_link = [
             line.nel_meto
             for line in tsv_lines
@@ -237,7 +277,7 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
             line.ne_fine_comp.split('-')[1]
             for line in tsv_lines
         ]
-        
+
         # entity components don't come with EL info
         ne_link = None
     elif entity_type == "nested":
@@ -245,17 +285,18 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
             line.ne_nested.split('-')[1]
             for line in tsv_lines
         ]
-        
+
         # entity components don't come with EL info
         ne_link = None
-    
+
     # if the NE link is absent, replace it with `None`
     if ne_link:
         ne_link = ne_link[0] if ne_link[0] != "_" else None
-    
+
     if ne_tag:
         # now we can build and return the entity object
         return HipeEntity(surface_form, entity_type, ne_tag[0], ne_link, line_numbers)
+
 
 def find_datasets_files(base_dir: str) -> List[str]:
     """Finds recursively TSV file in a folder.
@@ -318,7 +359,7 @@ def is_tsv_complete(dataset_path: str, expected_doc_ids: List[str]) -> bool:
     :type expected_doc_ids: List[str]
     :return: Returns `True` if the file is complete, otherwise `False`.
     :rtype: bool
-    """    
+    """
     with open(dataset_path, "r") as f:
         tsv_doc_ids = [
             line.strip().split("=")[-1].strip()
@@ -336,6 +377,47 @@ def is_tsv_complete(dataset_path: str, expected_doc_ids: List[str]) -> bool:
         return False
 
 
+def get_tsv_data(path: Optional[str] = None, url: Optional[str] = None) -> str:
+    """Fetches tsv data from a path or an url."""
+
+    assert path or url, """`path` or `url` must be provided"""
+
+    if url:
+        response = urllib.request.urlopen(url)
+        return response.read().decode('utf-8')
+
+    elif path:
+        with open(path) as f:
+            return f.read()
+
+
+def parse_tsv(mask_nerc: bool = False, mask_nel: bool = False, **kwargs) -> List[HipeDocument]:
+    if "file_url" in kwargs and kwargs['file_url']:
+        file_path = kwargs['file_url']
+        tsv_data = get_tsv_data(url=file_path)
+
+    elif "file_path" in kwargs and kwargs['file_path']:
+        file_path = kwargs['file_path']
+        tsv_data = get_tsv_data(path=file_path)
+
+    else:
+        raise
+
+    documents = [
+        HipeDocument(
+            path=file_path,
+            tsv_lines=[
+                parse_tsv_line(line, line_number, mask_nerc, mask_nel)
+                for line_number, line in enumerate(document.split("\n"))
+                if line.split('\t') != COL_LABELS and line != ""
+                # TODO: @matteo @ siclemat : the condition can be broken by a annotation starting with token "TOKEN")
+            ]
+        )
+        for document in tsv_data.split("\n\n")
+    ]
+    return documents
+
+
 def is_comment(line: str) -> bool:
     return line.startswith("#") and "=" in line
 
@@ -343,23 +425,24 @@ def is_comment(line: str) -> bool:
 def parse_comment(comment_line: str, line_number: int) -> TSVComment:
     """Parses a line of TSV file into a `TSVComment` object.
 
-    :param str comment_line: Description of parameter `comment_line`.
+    :param str comment_line: A commented line, in the format `'# key = value"`.
     :param int line_number: Description of parameter `line_number`.
     :return: Description of returned object.
     :rtype: TSVComment
 
     """
     try:
-        key, value = [
-            value.strip() for value in comment_line.replace("#", "").split("=")
-        ]
+        key, value = [el.strip() for el in comment_line.replace("#", "").split("=")]
     except:
         import ipdb
 
         ipdb.set_trace()
+
+    # TODO : In the current state of things, `key` and `value` might be called before declaration ⚠️ Change this.
     return TSVComment(n=line_number, field=key, value=value)
 
 
+# TODO: @matteo @siclemat is this necessary ?
 def parse_annotation(line: str, line_number: int) -> TSVAnnotation:
     """Parses a TSV line into a `TSVAnnotation` object."""
     values = line.split("\t")
@@ -367,51 +450,21 @@ def parse_annotation(line: str, line_number: int) -> TSVAnnotation:
         n=line_number,
         token=values[0],
         ne_coarse_lit=values[1] if len(values) >= 2 else None,
-        ne_coarse_meto=values[2]  if len(values) >= 3 else None,
-        ne_fine_lit=values[3]  if len(values) >= 4 else None,
-        ne_fine_meto=values[4]  if len(values) >= 5 else None,
-        ne_fine_comp=values[5]  if len(values) >= 6 else None,
-        ne_nested=values[6]  if len(values) >= 7 else None,
-        nel_lit=values[7]  if len(values) >= 8 else None,
-        nel_meto=values[8]  if len(values) >= 9 else None,
-        misc=values[9]  if len(values) >= 10 else None,
+        ne_coarse_meto=values[2] if len(values) >= 3 else None,
+        ne_fine_lit=values[3] if len(values) >= 4 else None,
+        ne_fine_meto=values[4] if len(values) >= 5 else None,
+        ne_fine_comp=values[5] if len(values) >= 6 else None,
+        ne_nested=values[6] if len(values) >= 7 else None,
+        nel_lit=values[7] if len(values) >= 8 else None,
+        nel_meto=values[8] if len(values) >= 9 else None,
+        misc=values[9] if len(values) >= 10 else None,
     )
 
 
-def parse_tsv(
-    mask_nerc: bool = False, mask_nel: bool = False, **kwargs
-) -> List[HipeDocument]:
+def parse_tsv_line(line: str, line_number: int, mask_nerc: bool = False, mask_nel: bool = False) -> TSVLine:
+    """General parser for tsv lines, leveraging `parse_comment` and `parse_annotation` for annotations
+    and commented lines respectively."""
 
-    if "file_url" in kwargs:
-        file_path = kwargs['file_url']
-        response = urllib.request.urlopen(file_path)
-        tsv_data = response.read().decode('utf-8')
-
-    elif "file_path" in kwargs:
-        file_path = kwargs['file_path']
-        with open(file_path) as f:
-            tsv_data = f.read()
-
-    else:
-        raise
-
-    documents = [
-            HipeDocument(
-                path=file_path,
-                tsv_lines = [
-                    parse_tsv_line(line, line_number, mask_nerc, mask_nel)
-                    for line_number, line in enumerate(document.split("\n"))
-                    if not line.startswith("TOKEN") and line != ""
-                ]
-            )
-            for document in tsv_data.split("\n\n")
-        ]
-    return documents
-
-
-def parse_tsv_line(
-    line: str, line_number: int, mask_nerc: bool = False, mask_nel: bool = False
-) -> TSVLine:
     if is_comment(line):
         return parse_comment(line, line_number)
     else:
@@ -480,4 +533,208 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
 
     with io.open(output_path, "w", encoding="utf-8") as f:
         f.write(csv_content)
-  
+
+
+def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None) -> pd.DataFrame:
+    """Converts a HIPE-compliant tsv to a `pd.DataFrame`, keeping comment fields as columns.
+
+    Each row corresponds to an annotation row of the tsv (i.e. a token). Commented fields (e.g. `'document_id`) are
+    added to the dataframe as columns.
+
+    ..note:: In the output-dataframe, column 'n' corresponds to the line number in the original tsv file, not in the
+    dataframe.
+
+    :param str path: Path to a HIPE-compliant tsv file
+    :param str url: url to a HIPE-compliant tsv file
+    """
+    data = get_tsv_data(path=path, url=url)
+
+    comments = {}
+    header = None
+    dict_ = None
+
+    for i, line in enumerate(data.split('\n')):
+
+        if not line:  # Skips empty lines
+            continue
+
+        if not header:  # Skips lines until valid header
+            header = [label.lower() for label in COL_LABELS] if line.split('\t') == COL_LABELS else None
+
+        else:
+            parsed_line = parse_tsv_line(line, i)
+
+            if isinstance(parsed_line, TSVComment):  # If comment, stock comment's field and value
+                comments[parsed_line.field] = parsed_line.value
+
+            else:  # else, appends annotations and comments values to `dict_`
+                dict_ = {k: [] for k in ['n'] + header + list(comments.keys())} if not dict_ else dict_
+                for k in dict_.keys():
+                    dict_[k].append(
+                        getattr(parsed_line, k) if k in parsed_line._fields else
+                        comments[k] if k in comments.keys() else None
+                    )
+    return pd.DataFrame(dict_)
+
+
+def tsv_to_lists(labels: List[str],
+                 path: Optional[str] = None,
+                 url: Optional[str] = None,
+                 segmentation_flag: Union[str, int] = 'EndOfLine') -> Dict[str, List[List[str]]]:
+    """Converts a HIPE-compliant tsv to lists of examples containing lists of tokens,
+    with their aligned labels and doc_ids.
+
+    Generally used to make data amenable to a HuggingFace Tokenizer.
+
+    The output is a dict containing tokens, labels and document_ids, all in the format:
+        ```
+        {'examples': [[sentence1_word1, sentence1_word2...],[sentence2_word1,...]...],
+         'doc_ids': [[doc_id, doc_id...],[doc_id,...]...],
+         'your_labels': [[sentence1_label1, sentence1_label2...],[sentence2_label1,...]...]}
+        ```
+    :param List[str] labels: The desired column labels (e.g. `['NE-COARSE-LIT','NEL-LIT'])
+    :param str path: Path to a HIPE-compliant tsv file
+    :param str url: url to a HIPE-compliant tsv file
+    :param str segmentation_flag: The flag to look up for in the MISC column and to use as a separator.
+        Should be `'EndOfLine'` or `'EndOfSentence'` or a any flag listed in the `tsv` module.
+
+    :returns: Dict, see above
+    """
+
+    documents = parse_tsv(file_path=path, file_url=url)
+    labels = [label.lower().replace('-', '_') for label in labels]  # Todo, harmonize this (see above)
+
+    d = {k: [] for k in ['examples', 'doc_ids'] + labels}
+
+    for document in documents:
+        document_id_field = [f for f in document.metadata.keys() if 'document_id' in f.lower()][0]
+
+        sentence_tokens = []
+        sentence_labels = {k: [] for k in labels}
+        sentence_doc_id = []
+
+        for line in (line_ for line_ in document._tsv_lines if isinstance(line_, TSVAnnotation)):  # list of words
+
+            sentence_tokens.append(line.token)
+            sentence_doc_id.append(document.metadata[document_id_field])
+            for label in labels:
+                sentence_labels[label].append(getattr(line, label))
+
+            if segmentation_flag in line.misc:
+                d['examples'].append(sentence_tokens)
+                d['doc_ids'].append(sentence_doc_id)
+                for label in labels:
+                    d[label].append(sentence_labels[label])
+
+                sentence_tokens = []
+                sentence_labels = {k: [] for k in labels}
+                sentence_doc_id = []
+
+    if sentence_tokens:
+        d['examples'].append(sentence_tokens)
+        d['doc_ids'].append(sentence_doc_id)
+        for label in labels:
+            d[label].append(sentence_labels[label])
+
+    return d
+
+
+def align_and_pad_labels(texts: "BatchEncoding",
+                         labels: List[List[str]],
+                         labels_to_ids: Dict[str, int],
+                         label_all_tokens: bool = True,
+                         null_label: object = -100) -> List[List[int]]:
+    """Converts labels to labelids, aligns and pads labels to tokenized texts, using token indices.
+
+    If `label_all_tokens` is `True`, labels attributed to a word in data are broadcast to all its corresponding
+    subtokens ; else, only the first subtoken is marked with a label, the rest being
+    marked with the `null_label`. Padded labels (i.e. labels between initial sequence length and `max_sequence_length`)
+    are marked with `null_label`.
+
+    :param texts: a BatchEncoding-object. Attribute `input_ids` contains tokenized text, in the format :
+    List[List[str]], e.g. `[["example", "one"],...]`.
+    :param labels: should come in the format outputed by `read_line_json` or `tokenize_and_pad_tokens`:
+    List[List[str]], e.g. `[["O", "B-AAWORK"],...]`.
+    :param labels_to_ids: A Dict[str,int] mapping labels to their respective ids.
+
+    :returns: The List[List[int]] of labels.
+    """
+
+    # Changes labels to id, keeping the list[list] architecture
+    original_labelids = [[labels_to_ids[label] for label in instance_labels] for instance_labels in labels]
+
+    all_labels = []
+    for i in range(len(texts["input_ids"])):
+        token_indices = texts.word_ids(batch_index=i)
+        previous_token_index = None
+        instance_labels = []
+
+        for token_index in token_indices:
+            if token_index is None:
+                instance_labels.append(null_label)
+
+            elif token_index != previous_token_index:
+                instance_labels.append(original_labelids[i][token_index])
+
+            else:
+                b_to_i_label = labels_to_ids['I'+labels[i][token_index][1:]] if labels[i][token_index] != 'O' else 'O'
+                instance_labels.append(b_to_i_label if label_all_tokens else null_label)
+            previous_token_index = token_index
+
+        all_labels.append(instance_labels)
+
+    return all_labels
+
+
+def tsv_to_torch_dataset(
+        label_type: str,
+        labels_to_ids: Dict[str, int],
+        tokenizer: Union['transformers.PreTrainedTokenizer', 'transformers.PreTrainedTokenizerFast'],
+        padding: bool = True,
+        truncation: bool = True,
+        path: Optional[str] = None,
+        url: Optional[str] = None,
+        label_all_tokens: bool = False,
+        null_label: object = -100,
+        **kwargs):
+    """Converts a HIPE-compliant tsv to a custom `torch.utils.data.Dataset`, making it directly amenable to
+    HuggingFace transformers.
+
+    What this does is:
+        1) Segmenting the tsv into annotated lists of examples using `tsv_to_lists`.
+        2) Aokenizing the created lists, using `tokenizer()`
+        3) Aligning labels, using `align_and_pad_labels`.
+
+    This will return a `torch.utils.data.Dataset` with tokens and their corresponding labels. Note that this will only
+    work with a single label column.
+
+    ..note: Other tokenizer parameters can be passed in as `kwargs`.
+
+    :param str label_type: The desired label type in the tsv, e.g. `'NE-COARSE-LIT'`
+    :param labels_to_ids: A Dict[str,int] mapping labels to their respective ids
+    :param tokenizer: A transformer tokenizer
+    :param bool padding: Whether to pad examples to max_sequence_length (512)
+    :param bool truncation: Whether to truncate longer examples
+    :param str path: The path to the tsv file
+    :param str url: The url of the tsv file (must be provided if path is not
+    :param bool label_all_tokens: See `align_and_pad_labels`
+    :param null_label: The desired null_label
+
+    :returns: A `torch.utils.data.Dataset` with tokens and their corresponding labels
+    """
+    label_type = label_type.lower().replace('-', '_')
+    data = tsv_to_lists(labels=[label_type], path=path, url=url)
+
+    tokenized_texts = tokenizer(data['examples'],
+                                is_split_into_words=True,
+                                padding=padding,
+                                truncation=truncation, **kwargs)
+
+    aligned_labels = align_and_pad_labels(tokenized_texts, labels=data[label_type],
+                                          labels_to_ids=labels_to_ids,
+                                          label_all_tokens=label_all_tokens,
+                                          null_label=null_label)
+
+    return HipeDataset(tokenized_texts, aligned_labels)
+
+
