@@ -1,9 +1,8 @@
 import os
 import io
 import urllib.request
-from typing import Set, List, Union, NamedTuple, Tuple, Dict, Optional
+from typing import Set, List, Union, NamedTuple, Dict, Optional
 import pandas as pd
-import torch
 
 # ======================================================================================================================
 #                                                       VARIABLES
@@ -183,20 +182,31 @@ class HipeDocument(object):
         return entities
 
 
-class HipeDataset(torch.utils.data.Dataset):
-    """A custom class to make HIPE-data amenable to pytorch and transformers"""
+def HipeDataset(encodings: "BatchEncoding", labels: List[List[int]]):
+    """Simple wrapper that assert torch is available before declaring the actual dataset-object."""
 
-    def __init__(self, encodings: "BatchEncoding", labels: List[List[int]]):
-        self.encodings = encodings
-        self.labels = labels
+    try:
+        import torch
 
-    def __getitem__(self, idx):
-        item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
-        item['labels'] = torch.tensor(self.labels[idx])
-        return item
+        class HipeDataset(torch.utils.data.Dataset):
+            """A custom class to make HIPE-data amenable to pytorch and transformers"""
 
-    def __len__(self):
-        return len(self.labels)
+            def __init__(self, encodings: "BatchEncoding", labels: List[List[int]]):
+                self.encodings = encodings
+                self.labels = labels
+
+            def __getitem__(self, idx):
+                item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
+                item['labels'] = torch.tensor(self.labels[idx])
+                return item
+
+            def __len__(self):
+                return len(self.labels)
+
+        return HipeDataset(encodings, labels)
+
+    except ModuleNotFoundError:
+        print("""Warning : Please install `torch` if you want to use `HipeDataset` and `tsv_to_torch_dataset`.""")
 
 
 # ======================================================================================================================
@@ -559,7 +569,7 @@ def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None) -> p
             continue
 
         if not header:  # Skips lines until valid header
-            header = [label.lower() for label in COL_LABELS] if line.split('\t') == COL_LABELS else None
+            header = COL_LABELS if line.split('\t') == COL_LABELS else None
 
         else:
             parsed_line = parse_tsv_line(line, i)
@@ -570,17 +580,17 @@ def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None) -> p
             else:  # else, appends annotations and comments values to `dict_`
                 dict_ = {k: [] for k in ['n'] + header + list(comments.keys())} if not dict_ else dict_
                 for k in dict_.keys():
+                    formated_k = k.lower().replace('-', '_')
                     dict_[k].append(
-                        getattr(parsed_line, k) if k in parsed_line._fields else
-                        comments[k] if k in comments.keys() else None
-                    )
+                        getattr(parsed_line, formated_k)
+                        if formated_k in parsed_line._fields else comments[k])
     return pd.DataFrame(dict_)
 
 
 def tsv_to_lists(labels: List[str],
                  path: Optional[str] = None,
                  url: Optional[str] = None,
-                 segmentation_flag: Union[str, int] = 'EndOfLine') -> Dict[str, List[List[str]]]:
+                 segmentation_flag: Union[str, int] = 'EndOf') -> Dict[str, List[List[str]]]:
     """Converts a HIPE-compliant tsv to lists of examples containing lists of tokens,
     with their aligned labels and doc_ids.
 
@@ -588,7 +598,7 @@ def tsv_to_lists(labels: List[str],
 
     The output is a dict containing tokens, labels and document_ids, all in the format:
         ```
-        {'examples': [[sentence1_word1, sentence1_word2...],[sentence2_word1,...]...],
+        {'texts': [[sentence1_word1, sentence1_word2...],[sentence2_word1,...]...],
          'doc_ids': [[doc_id, doc_id...],[doc_id,...]...],
          'your_labels': [[sentence1_label1, sentence1_label2...],[sentence2_label1,...]...]}
         ```
@@ -601,42 +611,76 @@ def tsv_to_lists(labels: List[str],
     :returns: Dict, see above
     """
 
-    documents = parse_tsv(file_path=path, file_url=url)
-    labels = [label.lower().replace('-', '_') for label in labels]  # Todo, harmonize this (see above)
+    df = tsv_to_dataframe(path=path, url=url)
+    d = {k: [] for k in ['texts', 'doc_ids'] + labels}
 
-    d = {k: [] for k in ['examples', 'doc_ids'] + labels}
+    doc_id_col = [col for col in df.columns if 'document_id' in col][0]
 
-    for document in documents:
-        document_id_field = [f for f in document.metadata.keys() if 'document_id' in f.lower()][0]
+    example_tokens = []
+    example_labels = {k: [] for k in labels}
+    example_doc_ids = []
 
-        sentence_tokens = []
-        sentence_labels = {k: [] for k in labels}
-        sentence_doc_id = []
-
-        for line in (line_ for line_ in document._tsv_lines if isinstance(line_, TSVAnnotation)):  # list of words
-
-            sentence_tokens.append(line.token)
-            sentence_doc_id.append(document.metadata[document_id_field])
-            for label in labels:
-                sentence_labels[label].append(getattr(line, label))
-
-            if segmentation_flag in line.misc:
-                d['examples'].append(sentence_tokens)
-                d['doc_ids'].append(sentence_doc_id)
-                for label in labels:
-                    d[label].append(sentence_labels[label])
-
-                sentence_tokens = []
-                sentence_labels = {k: [] for k in labels}
-                sentence_doc_id = []
-
-    if sentence_tokens:
-        d['examples'].append(sentence_tokens)
-        d['doc_ids'].append(sentence_doc_id)
+    for i in range(len(df)):
+        example_tokens.append(df['TOKEN'][i])
+        example_doc_ids.append(df[doc_id_col][i])
         for label in labels:
-            d[label].append(sentence_labels[label])
+            example_labels[label].append(df[label][i])
+
+        if segmentation_flag in df['MISC'][i]:
+            d['texts'].append(example_tokens)
+            d['doc_ids'].append(example_doc_ids)
+            for label in labels:
+                d[label].append(example_labels[label])
+
+            example_tokens = []
+            example_labels = {k: [] for k in labels}
+            example_doc_ids = []
+
+    if example_tokens:
+        d['texts'].append(example_tokens)
+        d['doc_ids'].append(example_doc_ids)
+        for label in labels:
+            d[label].append(example_labels[label])
 
     return d
+
+
+def tsv_to_torch_dataset(
+        label_type: str,
+        labels_to_ids: Dict[str, int],
+        tokenizer: Union['transformers.PreTrainedTokenizer', 'transformers.PreTrainedTokenizerFast'],
+        path: Optional[str] = None,
+        url: Optional[str] = None,
+        **kwargs):
+    """Converts a HIPE-compliant tsv to a custom `torch.utils.data.Dataset`, making it directly amenable to
+    HuggingFace transformers.
+
+    What this does is:
+        1) Segmenting the tsv into annotated lists of examples using `tsv_to_lists`
+        2) Aokenizing the created lists, using `tokenizer()`
+        3) Aligning labels, using `align_and_pad_labels`.
+    Please customize these calls using additional `kwargs`, such as `segmentation_flag`, `padding` (see each function's
+    docs).
+
+    This will return a `torch.utils.data.Dataset` with tokens and their corresponding labels. Note that this will only
+    work with a single label column.
+
+    :param str label_type: The desired label type in the tsv, e.g. `'NE-COARSE-LIT'`
+    :param labels_to_ids: A Dict[str,int] mapping labels to their respective ids
+    :param tokenizer: A transformer tokenizer
+    :param str path: The path to the tsv file
+    :param str url: The url of the tsv file (must be provided if path is not
+
+    :returns: A `torch.utils.data.Dataset` with tokens and their corresponding labels
+    """
+    data = tsv_to_lists(labels=[label_type], path=path, url=url, **kwargs)
+
+    tokenized_texts = tokenizer(data['texts'], is_split_into_words=True, **kwargs)
+
+    aligned_labels = align_and_pad_labels(tokenized_texts, labels=data[label_type],
+                                          labels_to_ids=labels_to_ids, **kwargs)
+
+    return HipeDataset(tokenized_texts, aligned_labels)
 
 
 def align_and_pad_labels(texts: "BatchEncoding",
@@ -677,7 +721,7 @@ def align_and_pad_labels(texts: "BatchEncoding",
                 instance_labels.append(original_labelids[i][token_index])
 
             else:
-                b_to_i_label = labels_to_ids['I'+labels[i][token_index][1:]] if labels[i][token_index] != 'O' else 'O'
+                b_to_i_label = labels_to_ids['I' + labels[i][token_index][1:]] if labels[i][token_index] != 'O' else 'O'
                 instance_labels.append(b_to_i_label if label_all_tokens else null_label)
             previous_token_index = token_index
 
@@ -686,55 +730,30 @@ def align_and_pad_labels(texts: "BatchEncoding",
     return all_labels
 
 
-def tsv_to_torch_dataset(
-        label_type: str,
-        labels_to_ids: Dict[str, int],
-        tokenizer: Union['transformers.PreTrainedTokenizer', 'transformers.PreTrainedTokenizerFast'],
-        padding: bool = True,
-        truncation: bool = True,
-        path: Optional[str] = None,
-        url: Optional[str] = None,
-        label_all_tokens: bool = False,
-        null_label: object = -100,
-        **kwargs):
-    """Converts a HIPE-compliant tsv to a custom `torch.utils.data.Dataset`, making it directly amenable to
-    HuggingFace transformers.
+def get_unique_labels(path: Optional[str] = None, url: Optional[str] = None, label_type: Optional[str] = None,
+                      label_list: Optional[List[str]] = None) -> List[str]:
+    """Returns a list of unique labels contained in a HIPE-tsv file or directly in a label list"""
 
-    What this does is:
-        1) Segmenting the tsv into annotated lists of examples using `tsv_to_lists`.
-        2) Aokenizing the created lists, using `tokenizer()`
-        3) Aligning labels, using `align_and_pad_labels`.
+    if not label_list:
+        label_list = tsv_to_dataframe(path, url)[label_type].tolist()
 
-    This will return a `torch.utils.data.Dataset` with tokens and their corresponding labels. Note that this will only
-    work with a single label column.
+    labels = ['O']
 
-    ..note: Other tokenizer parameters can be passed in as `kwargs`.
+    for label in sorted(set([label_[2:] for label_ in label_list if label_ != 'O'])):
+        labels.append('B-' + label)
+        labels.append('I-' + label)
 
-    :param str label_type: The desired label type in the tsv, e.g. `'NE-COARSE-LIT'`
-    :param labels_to_ids: A Dict[str,int] mapping labels to their respective ids
-    :param tokenizer: A transformer tokenizer
-    :param bool padding: Whether to pad examples to max_sequence_length (512)
-    :param bool truncation: Whether to truncate longer examples
-    :param str path: The path to the tsv file
-    :param str url: The url of the tsv file (must be provided if path is not
-    :param bool label_all_tokens: See `align_and_pad_labels`
-    :param null_label: The desired null_label
+    return labels
 
-    :returns: A `torch.utils.data.Dataset` with tokens and their corresponding labels
-    """
-    label_type = label_type.lower().replace('-', '_')
-    data = tsv_to_lists(labels=[label_type], path=path, url=url)
+#%%
 
-    tokenized_texts = tokenizer(data['examples'],
-                                is_split_into_words=True,
-                                padding=padding,
-                                truncation=truncation, **kwargs)
+from transformers import AutoTokenizer
 
-    aligned_labels = align_and_pad_labels(tokenized_texts, labels=data[label_type],
-                                          labels_to_ids=labels_to_ids,
-                                          label_all_tokens=label_all_tokens,
-                                          null_label=null_label)
+tokenizer = AutoTokenizer.from_pretrained('bert-base-cased')
+data_lists = tsv_to_lists(['NE-COARSE-LIT'], url='https://raw.githubusercontent.com/hipe-eval/HIPE-2022-data/main/data/v2.0/ajmc/de/HIPE-2022-v2.0-ajmc-dev-de.tsv')
+unique_labels = get_unique_labels(label_list=[l for l_list in data_lists['NE-COARSE-LIT'] for l in l_list])
+labels_to_ids = {l: i for i, l in enumerate(unique_labels)}
 
-    return HipeDataset(tokenized_texts, aligned_labels)
+dataset = tsv_to_torch_dataset('NE-COARSE-LIT', labels_to_ids, tokenizer, url='https://raw.githubusercontent.com/hipe-eval/HIPE-2022-data/main/data/v2.0/ajmc/de/HIPE-2022-v2.0-ajmc-dev-de.tsv')
 
-
+len(dataset.labels)
