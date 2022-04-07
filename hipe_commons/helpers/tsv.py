@@ -182,33 +182,6 @@ class HipeDocument(object):
         return entities
 
 
-def HipeDataset(encodings: "BatchEncoding", labels: List[List[int]]):
-    """Simple wrapper that assert torch is available before declaring the actual dataset-object."""
-
-    try:
-        import torch
-
-        class HipeDataset(torch.utils.data.Dataset):
-            """A custom class to make HIPE-data amenable to pytorch and transformers"""
-
-            def __init__(self, encodings: "BatchEncoding", labels: List[List[int]]):
-                self.encodings = encodings
-                self.labels = labels
-
-            def __getitem__(self, idx):
-                item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
-                item['labels'] = torch.tensor(self.labels[idx])
-                return item
-
-            def __len__(self):
-                return len(self.labels)
-
-        return HipeDataset(encodings, labels)
-
-    except ModuleNotFoundError:
-        print("""Warning : Please install `torch` if you want to use `HipeDataset` and `tsv_to_torch_dataset`.""")
-
-
 # ======================================================================================================================
 #                                                       HELPER FUNCTIONS
 # ======================================================================================================================
@@ -645,22 +618,43 @@ def tsv_to_lists(labels: List[str],
     return d
 
 
+def tsv_to_huggingface_dataset(
+        labels: List[str],
+        path: Optional[str] = None,
+        url: Optional[str] = None,
+        segmentation_flag: str = 'EndOf'
+):
+    """Converts a HIPE-compliant tsv to a custom `torch.utils.data.Dataset`, making it directly amenable to
+       HuggingFace transformers.
+
+       ..note.: Unlike `tsv_to_torch_dataset`, this function does NOT tokenize the texts, and simply converts it
+       to the datasets pyarrow datastructure."""
+
+    from datasets import Dataset
+    data = tsv_to_lists(labels=labels, path=path, url=url, segmentation_flag=segmentation_flag)
+    return Dataset.from_dict(data)
+
+
 def tsv_to_torch_dataset(
         label_type: str,
         labels_to_ids: Dict[str, int],
         tokenizer: Union['transformers.PreTrainedTokenizer', 'transformers.PreTrainedTokenizerFast'],
         path: Optional[str] = None,
         url: Optional[str] = None,
-        **kwargs):
+        segmentation_flag: Union[str, int] = 'EndOf',
+        label_all_tokens: bool = False,
+        **tokenizer_kwargs):
     """Converts a HIPE-compliant tsv to a custom `torch.utils.data.Dataset`, making it directly amenable to
-    HuggingFace transformers.
+    torch and HuggingFace transformers.
 
     What this does is:
         1) Segmenting the tsv into annotated lists of examples using `tsv_to_lists`
         2) Aokenizing the created lists, using `tokenizer()`
         3) Aligning labels, using `align_and_pad_labels`.
-    Please customize these calls using additional `kwargs`, such as `segmentation_flag`, `padding` (see each function's
-    docs).
+    Please customize these calls using additional `tokenizer_kwargs`, such as `padding` (see docs).
+
+    ..note.: If you use the tokenizer to truncate sentences, the overflowing will be lost. Do handle this, please use
+    `tsv_to_huggingface_dataset` instead.
 
     This will return a `torch.utils.data.Dataset` with tokens and their corresponding labels. Note that this will only
     work with a single label column.
@@ -670,64 +664,85 @@ def tsv_to_torch_dataset(
     :param tokenizer: A transformer tokenizer
     :param str path: The path to the tsv file
     :param str url: The url of the tsv file (must be provided if path is not
+    :param segmentation_flag: See `tsv_to_lists`.
+    :param label_all_tokens: See `align_and_pad_tags`.
 
     :returns: A `torch.utils.data.Dataset` with tokens and their corresponding labels
     """
-    data = tsv_to_lists(labels=[label_type], path=path, url=url, **kwargs)
 
-    tokenized_texts = tokenizer(data['texts'], is_split_into_words=True, **kwargs)
+    import torch
+
+    def align_and_pad_labels(texts: "BatchEncoding",
+                             labels: List[List[str]],
+                             labels_to_ids: Dict[str, int],
+                             label_all_tokens: bool = False,
+                             null_label: object = -100) -> List[List[int]]:
+        """Converts labels to labelids, aligns and pads labels to tokenized texts, using token indices.
+
+        If `label_all_tokens` is `True`, labels attributed to a word in data are broadcast to all its corresponding
+        subtokens ; else, only the first subtoken is marked with a label, the rest being
+        marked with the `null_label`. Padded labels (i.e. labels between initial sequence length and `max_sequence_length`)
+        are marked with `null_label`.
+
+        :param texts: a BatchEncoding-object. Attribute `input_ids` contains tokenized text, in the format :
+        List[List[str]], e.g. `[["example", "one"],...]`.
+        :param labels: should come in the format outputed by `read_line_json` or `tokenize_and_pad_tokens`:
+        List[List[str]], e.g. `[["O", "B-AAWORK"],...]`.
+        :param labels_to_ids: A Dict[str,int] mapping labels to their respective ids.
+
+        :returns: The List[List[int]] of labels.
+        """
+
+        # Changes labels to id, keeping the list[list] architecture
+        original_labelids = [[labels_to_ids[label] for label in instance_labels] for instance_labels in labels]
+
+        all_labels = []
+        for i in range(len(texts["input_ids"])):
+            token_indices = texts.word_ids(batch_index=i)
+            previous_token_index = None
+            instance_labels = []
+
+            for token_index in token_indices:
+                if token_index is None:
+                    instance_labels.append(null_label)
+
+                elif token_index != previous_token_index:
+                    instance_labels.append(original_labelids[i][token_index])
+
+                else:
+                    b_to_i_label = labels_to_ids['I' + labels[i][token_index][1:]] if labels[i][
+                                                                                          token_index] != 'O' else 'O'
+                    instance_labels.append(b_to_i_label if label_all_tokens else null_label)
+                previous_token_index = token_index
+
+            all_labels.append(instance_labels)
+
+        return all_labels
+
+    class HipeTorchDataset(torch.utils.data.Dataset):
+        """A custom class to make HIPE-data amenable to pytorch and transformers"""
+
+        def __init__(self, encodings: "BatchEncoding", labels: List[List[int]]):
+            self.encodings = encodings
+            self.labels = labels
+
+        def __getitem__(self, idx):
+            item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
+            item['labels'] = torch.tensor(self.labels[idx])
+            return item
+
+        def __len__(self):
+            return len(self.labels)
+
+    data = tsv_to_lists(labels=[label_type], path=path, url=url, segmentation_flag=segmentation_flag)
+
+    tokenized_texts = tokenizer(data['texts'], is_split_into_words=True, **tokenizer_kwargs)
 
     aligned_labels = align_and_pad_labels(tokenized_texts, labels=data[label_type],
-                                          labels_to_ids=labels_to_ids, **kwargs)
+                                          labels_to_ids=labels_to_ids,
+                                          label_all_tokens=label_all_tokens)
 
-    return HipeDataset(tokenized_texts, aligned_labels)
-
-
-def align_and_pad_labels(texts: "BatchEncoding",
-                         labels: List[List[str]],
-                         labels_to_ids: Dict[str, int],
-                         label_all_tokens: bool = True,
-                         null_label: object = -100) -> List[List[int]]:
-    """Converts labels to labelids, aligns and pads labels to tokenized texts, using token indices.
-
-    If `label_all_tokens` is `True`, labels attributed to a word in data are broadcast to all its corresponding
-    subtokens ; else, only the first subtoken is marked with a label, the rest being
-    marked with the `null_label`. Padded labels (i.e. labels between initial sequence length and `max_sequence_length`)
-    are marked with `null_label`.
-
-    :param texts: a BatchEncoding-object. Attribute `input_ids` contains tokenized text, in the format :
-    List[List[str]], e.g. `[["example", "one"],...]`.
-    :param labels: should come in the format outputed by `read_line_json` or `tokenize_and_pad_tokens`:
-    List[List[str]], e.g. `[["O", "B-AAWORK"],...]`.
-    :param labels_to_ids: A Dict[str,int] mapping labels to their respective ids.
-
-    :returns: The List[List[int]] of labels.
-    """
-
-    # Changes labels to id, keeping the list[list] architecture
-    original_labelids = [[labels_to_ids[label] for label in instance_labels] for instance_labels in labels]
-
-    all_labels = []
-    for i in range(len(texts["input_ids"])):
-        token_indices = texts.word_ids(batch_index=i)
-        previous_token_index = None
-        instance_labels = []
-
-        for token_index in token_indices:
-            if token_index is None:
-                instance_labels.append(null_label)
-
-            elif token_index != previous_token_index:
-                instance_labels.append(original_labelids[i][token_index])
-
-            else:
-                b_to_i_label = labels_to_ids['I' + labels[i][token_index][1:]] if labels[i][token_index] != 'O' else 'O'
-                instance_labels.append(b_to_i_label if label_all_tokens else null_label)
-            previous_token_index = token_index
-
-        all_labels.append(instance_labels)
-
-    return all_labels
+    return HipeTorchDataset(tokenized_texts, aligned_labels)
 
 
 def get_unique_labels(path: Optional[str] = None, url: Optional[str] = None, label_type: Optional[str] = None,
@@ -744,16 +759,3 @@ def get_unique_labels(path: Optional[str] = None, url: Optional[str] = None, lab
         labels.append('I-' + label)
 
     return labels
-
-#%%
-
-from transformers import AutoTokenizer
-
-tokenizer = AutoTokenizer.from_pretrained('bert-base-cased')
-data_lists = tsv_to_lists(['NE-COARSE-LIT'], url='https://raw.githubusercontent.com/hipe-eval/HIPE-2022-data/main/data/v2.0/ajmc/de/HIPE-2022-v2.0-ajmc-dev-de.tsv')
-unique_labels = get_unique_labels(label_list=[l for l_list in data_lists['NE-COARSE-LIT'] for l in l_list])
-labels_to_ids = {l: i for i, l in enumerate(unique_labels)}
-
-dataset = tsv_to_torch_dataset('NE-COARSE-LIT', labels_to_ids, tokenizer, url='https://raw.githubusercontent.com/hipe-eval/HIPE-2022-data/main/data/v2.0/ajmc/de/HIPE-2022-v2.0-ajmc-dev-de.tsv')
-
-len(dataset.labels)

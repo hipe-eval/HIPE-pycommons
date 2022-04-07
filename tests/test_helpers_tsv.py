@@ -5,7 +5,7 @@ import pip
 import pytest
 
 from hipe_commons.helpers.tsv import parse_tsv, HipeDocument, tsv_to_dataframe, tsv_to_lists, tsv_to_torch_dataset, \
-    get_unique_labels
+    get_unique_labels, tsv_to_huggingface_dataset
 
 
 def test_parse_tsv_from_file(sample_tsv_path):
@@ -49,3 +49,11 @@ def test_tsv_to_torch_dataset(sample_tsv_url, sample_label):
     dataset = tsv_to_torch_dataset(sample_label, labels_to_ids, tokenizer, url=sample_tsv_url)
 
     assert len(data_lists['texts']) == len(dataset.labels)
+
+
+@pytest.mark.skipif(pip.main(['show', 'datasets']) != 0,
+                    reason="""`datasets` not installed, skipping test.""")
+def test_tsv_to_torch_dataset(sample_tsv_url, sample_label):
+    data_lists = tsv_to_lists([sample_label], url=sample_tsv_url)
+    dataset = tsv_to_huggingface_dataset([sample_label], url=sample_tsv_url)
+    assert all([a == b['texts'] for a, b in zip(data_lists['texts'], dataset)])
