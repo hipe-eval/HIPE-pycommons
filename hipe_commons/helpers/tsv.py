@@ -7,7 +7,6 @@ import pandas as pd
 # ======================================================================================================================
 #                                                       VARIABLES
 # ======================================================================================================================
-
 COL_LABELS = [
     "TOKEN",
     "NE-COARSE-LIT",
@@ -518,7 +517,48 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
         f.write(csv_content)
 
 
-def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None) -> pd.DataFrame:
+def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comments: bool = False) -> Dict[str, List[str]]:
+    """The simplest and most straightforward way to get tsv-data into a python structure. This function is used as the
+    basis for other converters"""
+
+    data = get_tsv_data(path, url).split('\n')
+
+    if not keep_comments:
+        header = data.pop(0).split('\t')
+        dict_ = {k: [] for k in ['n'] + header}
+
+        for i, line in enumerate(data):
+            if line and not line.startswith('#'):
+                line = line.split('\t')
+                dict_['n'].append(i)
+                for j, k in enumerate(header):
+                    dict_[k].append(line[j])
+            else:
+                continue
+
+    else:
+        comments, header, dict_ = {}, data.pop(0).split('\t'), None
+
+        for i, line in enumerate(data):
+
+            if line:
+                parsed_line = parse_tsv_line(line, i)
+
+                if isinstance(parsed_line, TSVComment):  # If comment, stock comment's field and value
+                    comments[parsed_line.field] = parsed_line.value
+
+                else:  # else, appends annotations and comments values to `dict_`
+                    dict_ = {k: [] for k in ['n'] + header + list(comments.keys())} if not dict_ else dict_
+                    for k in dict_.keys():
+                        formated_k = k.lower().replace('-', '_')
+                        dict_[k].append(
+                            getattr(parsed_line, formated_k)
+                            if formated_k in parsed_line._fields else comments[k])
+
+
+    return dict_
+
+def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None, keep_comments:bool=False) -> pd.DataFrame:
     """Converts a HIPE-compliant tsv to a `pd.DataFrame`, keeping comment fields as columns.
 
     Each row corresponds to an annotation row of the tsv (i.e. a token). Commented fields (e.g. `'document_id`) are
@@ -530,40 +570,13 @@ def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None) -> p
     :param str path: Path to a HIPE-compliant tsv file
     :param str url: url to a HIPE-compliant tsv file
     """
-    data = get_tsv_data(path=path, url=url)
-
-    comments = {}
-    header = None
-    dict_ = None
-
-    for i, line in enumerate(data.split('\n')):
-
-        if not line:  # Skips empty lines
-            continue
-
-        if not header:  # Skips lines until valid header
-            header = COL_LABELS if line.split('\t') == COL_LABELS else None
-
-        else:
-            parsed_line = parse_tsv_line(line, i)
-
-            if isinstance(parsed_line, TSVComment):  # If comment, stock comment's field and value
-                comments[parsed_line.field] = parsed_line.value
-
-            else:  # else, appends annotations and comments values to `dict_`
-                dict_ = {k: [] for k in ['n'] + header + list(comments.keys())} if not dict_ else dict_
-                for k in dict_.keys():
-                    formated_k = k.lower().replace('-', '_')
-                    dict_[k].append(
-                        getattr(parsed_line, formated_k)
-                        if formated_k in parsed_line._fields else comments[k])
-    return pd.DataFrame(dict_)
+    return pd.DataFrame(tsv_to_dict(path=path, url=url, keep_comments=keep_comments))
 
 
-def tsv_to_lists(labels: List[str],
-                 path: Optional[str] = None,
-                 url: Optional[str] = None,
-                 segmentation_flag: Union[str, int] = 'EndOf') -> Dict[str, List[List[str]]]:
+def tsv_to_segmented_lists(labels: List[str],
+                           path: Optional[str] = None,
+                           url: Optional[str] = None,
+                           segmentation_flag: Union[str, int] = 'EndOf') -> Dict[str, List[List[str]]]:
     """Converts a HIPE-compliant tsv to lists of examples containing lists of tokens,
     with their aligned labels and doc_ids.
 
@@ -631,7 +644,7 @@ def tsv_to_huggingface_dataset(
        to the datasets pyarrow datastructure."""
 
     from datasets import Dataset
-    data = tsv_to_lists(labels=labels, path=path, url=url, segmentation_flag=segmentation_flag)
+    data = tsv_to_segmented_lists(labels=labels, path=path, url=url, segmentation_flag=segmentation_flag)
     return Dataset.from_dict(data)
 
 
@@ -734,7 +747,7 @@ def tsv_to_torch_dataset(
         def __len__(self):
             return len(self.labels)
 
-    data = tsv_to_lists(labels=[label_type], path=path, url=url, segmentation_flag=segmentation_flag)
+    data = tsv_to_segmented_lists(labels=[label_type], path=path, url=url, segmentation_flag=segmentation_flag)
 
     tokenized_texts = tokenizer(data['texts'], is_split_into_words=True, **tokenizer_kwargs)
 
@@ -759,3 +772,6 @@ def get_unique_labels(path: Optional[str] = None, url: Optional[str] = None, lab
         labels.append('I-' + label)
 
     return labels
+
+
+
