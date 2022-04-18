@@ -522,12 +522,12 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
     basis for other converters"""
 
     data = get_tsv_data(path, url).split('\n')
+    header = data[0].split('\t')
 
     if not keep_comments:
-        header = data.pop(0).split('\t')
         dict_ = {k: [] for k in ['n'] + header}
 
-        for i, line in enumerate(data):
+        for i, line in enumerate(data[1:]):  # As data[0] is the header
             if line and not line.startswith('#'):
                 line = line.split('\t')
                 dict_['n'].append(i)
@@ -537,9 +537,9 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
                 continue
 
     else:
-        comments, header, dict_ = {}, data.pop(0).split('\t'), None
+        comments, dict_ = {}, None
 
-        for i, line in enumerate(data):
+        for i, line in enumerate(data[1:]):  # As data[0] is the header
 
             if line:
                 parsed_line = parse_tsv_line(line, i)
