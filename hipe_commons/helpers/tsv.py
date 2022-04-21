@@ -530,7 +530,7 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
         for i, line in enumerate(data[1:]):  # As data[0] is the header
             if line and not line.startswith('#'):
                 line = line.split('\t')
-                dict_['n'].append(i)
+                dict_['n'].append(i+1)  # as we are starting with data[1:]
                 for j, k in enumerate(header):
                     dict_[k].append(line[j])
             else:
@@ -542,7 +542,7 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
         for i, line in enumerate(data[1:]):  # As data[0] is the header
 
             if line:
-                parsed_line = parse_tsv_line(line, i)
+                parsed_line = parse_tsv_line(line, i+1)
 
                 if isinstance(parsed_line, TSVComment):  # If comment, stock comment's field and value
                     comments[parsed_line.field] = parsed_line.value
