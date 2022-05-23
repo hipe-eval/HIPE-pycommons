@@ -597,7 +597,7 @@ def tsv_to_segmented_lists(labels: List[str],
     :returns: Dict, see above
     """
 
-    df = tsv_to_dataframe(path=path, url=url)
+    df = tsv_to_dataframe(path=path, url=url, keep_comments=True)
     d = {k: [] for k in ['texts', 'doc_ids'] + labels}
 
     doc_id_col = [col for col in df.columns if 'document_id' in col][0]
