@@ -467,6 +467,20 @@ def mask_all_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
     Only neutral fields are kept (`token` and `misc`), while all the rest is
     replaced with the `mask` character
     """
+
+    misc = annotation.misc
+    misc_values = misc.split("|")
+    masked_misc = "|".join(
+        [
+            value 
+            for value in misc_values 
+            if (
+                "LED" not in value and
+                "Reference" not in value
+            ) 
+        ]
+    )
+
     masked_annotation = TSVAnnotation(
         n=annotation.n,
         token=annotation.token,
@@ -478,7 +492,7 @@ def mask_all_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
         ne_nested=mask,
         nel_lit=mask,
         nel_meto=mask,
-        misc=annotation.misc,
+        misc=masked_misc,
     )
     return masked_annotation
 
@@ -490,6 +504,10 @@ def mask_nel_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
     Only NERC-related + neutral fields are kept (`token` and `misc`), while all the rest is
     replaced with the `mask` character.
     """
+    misc = annotation.misc
+    misc_values = misc.split("|")
+    masked_misc = "|".join([value for value in misc_values if "LED" not in value])
+
     masked_annotation = TSVAnnotation(
         n=annotation.n,
         token=annotation.token,
@@ -501,7 +519,7 @@ def mask_nel_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
         ne_nested=mask,
         nel_lit=mask,
         nel_meto=mask,
-        misc=annotation.misc,
+        misc=masked_misc,
     )
     return masked_annotation
 
@@ -509,7 +527,7 @@ def mask_nel_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
 def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
     headers = COL_LABELS
     raw_csv = "\n\n".join(
-        ("\n".join((str(line) for line in document)) for document in documents)
+        ("\n".join((str(line) for line in document._tsv_lines)) for document in documents)
     )
     headers_line = "\t".join(headers)
     csv_content = f"{headers_line}\n{raw_csv}\n"
