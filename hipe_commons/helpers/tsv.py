@@ -3,10 +3,12 @@ import io
 import urllib.request
 from typing import Set, List, Union, NamedTuple, Dict, Optional
 import pandas as pd
+from dataclasses import dataclass
 
 # ======================================================================================================================
 #                                                       VARIABLES
 # ======================================================================================================================
+# V1 used for HIPE-2020 and HIPE-2022
 COL_LABELS = [
     "TOKEN",
     "NE-COARSE-LIT",
@@ -20,7 +22,23 @@ COL_LABELS = [
     "MISC",
 ]
 
-ENTITY_TYPES = [
+# V2 used for hipe-newsbench
+COL_LABELS_V2 = [
+    "TOKEN",
+    "NE-COARSE-LIT",
+    "NE-COARSE-METO",
+    "NE-FINE-LIT",
+    "NE-FINE-METO",
+    "NE-FINE-COMP",
+    "NE-NESTED",
+    "NEL-LIT",
+    "NEL-METO",
+    "RENDER",
+    "SEG",
+    "OCR-INFO",
+    "MISC"
+]
+NE_ANNOTATION_TYPES = [
     "coarse_lit",
     "coarse_meto",
     "fine_lit",
@@ -35,6 +53,9 @@ END_OF_LINE_FLAG = "EndOfLine"
 END_OF_SENTENCE_FLAG = "EndOfSentence"
 NIL_FLAG = "NIL"
 BLANK_LINE_FLAG = "BLANK_LINE"
+
+IOB_FIRST_LINE = "# global.columns = TOKEN NE-COARSE-LIT NE-COARSE-METO NE-FINE-LIT NE-FINE-METO NE-FINE-COMP " \
+                 "NE-NESTED NEL-LIT NEL-METO RENDER SEG OCR-INFO MISC"
 
 
 # ======================================================================================================================
@@ -53,9 +74,34 @@ class TSVComment(NamedTuple):
         return f"# {self.field} = {self.value}"
 
 
-# TODO : @matteo @siclemat :
-#   The fact attributes in `TSVAnnotation` are in format `bla_foo_bar` instead of `BLA-FOO-BAR`
-#   can make the handling of the object less easy... Could we harmonize this ?
+@dataclass(frozen=False)
+class TSVAnnotation_v2():
+    """Data class representing a HIPE tsv-line containing annotations, v2 (13 columns)."""
+    n: int
+    token: str
+    ne_coarse_lit: str
+    ne_coarse_meto: str
+    ne_fine_lit: str
+    ne_fine_meto: str
+    ne_fine_comp: str
+    ne_nested: str
+    nel_lit: str
+    nel_meto: str
+    render: str
+    seg: str
+    ocr_info: str
+    misc: str
+
+    def __repr__(self):
+        return (
+            f"{self.token}\t{self.ne_coarse_lit}\t"
+            f"{self.ne_coarse_meto}\t{self.ne_fine_lit}\t"
+            f"{self.ne_fine_meto}\t{self.ne_fine_comp}\t{self.ne_nested}\t"
+            f"{self.nel_lit}\t{self.nel_meto}\t{self.render}\t"
+            f"{self.seg}\t{self.ocr_info}\t{self.misc}"
+        )
+
+
 class TSVAnnotation(NamedTuple):
     """Namedtuple representing an ordinary tsv-line, containing annotations."""
     n: int
@@ -78,8 +124,28 @@ class TSVAnnotation(NamedTuple):
             f"{self.nel_lit}\t{self.nel_meto}\t{self.misc}"
         )
 
+    def convert2_tsv_annotation_v2(self) -> TSVAnnotation_v2:
+        return TSVAnnotation_v2(
+            n=self.n,
+            token=self.token,
+            ne_coarse_lit=self.ne_coarse_lit,
+            ne_coarse_meto=self.ne_coarse_meto,
+            ne_fine_lit=self.ne_fine_lit,
+            ne_fine_meto=self.ne_fine_meto,
+            ne_fine_comp=self.ne_fine_comp,
+            ne_nested=self.ne_nested,
+            nel_lit=self.nel_lit,
+            nel_meto=self.nel_meto,
+            render=None,
+            seg=None,
+            ocr_info=None,
+            misc=self.misc
+        )
+
 
 TSVLine = Union[TSVAnnotation, TSVComment]
+
+TSVLine_v2 = Union[TSVAnnotation_v2, TSVComment]
 
 
 class HipeEntity(object):
@@ -112,12 +178,12 @@ class HipeDocument(object):
             if isinstance(line, TSVComment)
         }
 
-        for e_type in ENTITY_TYPES:
+        for e_type in NE_ANNOTATION_TYPES:
             entities = self._lines2entities(e_type)
             if entities:
                 self.entities[e_type] = entities
 
-    def _lines2entities(self, entity_type: str) -> List[HipeEntity]:
+    def _lines2entities(self, entity_type: str, hipe_format_version="v1") -> List[HipeEntity]:
         """Parse a token-based entity representation into a `HipeEntity` object.
 
         :param entity_type: The entity type to consider (any of the values in `ENTITY_TYPES`)
@@ -176,7 +242,7 @@ class HipeDocument(object):
 
         # 2) parse line groups into HipeEntity class instances                
         for group in line_groups:
-            entities.append(lines2entity(group, entity_type))
+            entities.append(lines2entity(group, entity_type, hipe_format_version=hipe_format_version))
 
         return entities
 
@@ -185,7 +251,7 @@ class HipeDocument(object):
 #                                                       HELPER FUNCTIONS
 # ======================================================================================================================
 
-def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
+def lines2entity(tsv_lines: List[TSVLine], entity_type: str, hipe_format_version="v1") -> HipeEntity:
     """Converts a group of TSV lines into a `HipeEntity` object.
 
     :param tsv_lines: List of TSV lines corresponding to a token-based representation of an entity.
@@ -202,7 +268,9 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str) -> HipeEntity:
     surface_form = ""
     for line in tsv_lines:
         surface_form += line.token
-        if not "NoSpaceAfter" in line.misc:
+        if hipe_format_version == "v1" and not "NoSpaceAfter" in line.misc:
+            surface_form += " "
+        if hipe_format_version == "v2" and not "NoSpaceAfter" in line.render:
             surface_form += " "
 
     # keep track of the TSV line numbers over which the entity spans.
@@ -332,7 +400,7 @@ def find_missing_iiif_links(input_tsv_file: str) -> Set[str]:
     return missing_links
 
 
-def is_tsv_complete(dataset_path: str, expected_doc_ids: List[str]) -> bool:
+def is_tsv_complete(dataset_path: str, expected_doc_ids: List[str]) -> bool: #TODO: move to test?
     """Verifies whether a given TSV file (dataset) contains all expected documents  
 
     :param dataset_path: Path to the TSV file.
@@ -373,7 +441,9 @@ def get_tsv_data(path: Optional[str] = None, url: Optional[str] = None) -> str:
             return f.read()
 
 
-def parse_tsv(mask_nerc: bool = False, mask_nel: bool = False, **kwargs) -> List[HipeDocument]:
+def parse_tsv(mask_nerc: bool = False, mask_nel: bool = False, hipe_format_version="v1", **kwargs) -> List[
+    HipeDocument]:
+
     if "file_url" in kwargs and kwargs['file_url']:
         file_path = kwargs['file_url']
         tsv_data = get_tsv_data(url=file_path)
@@ -385,19 +455,32 @@ def parse_tsv(mask_nerc: bool = False, mask_nel: bool = False, **kwargs) -> List
     else:
         raise
 
-    documents = [
-        HipeDocument(
-            path=file_path,
-            tsv_lines=[
-                parse_tsv_line(line, line_number, mask_nerc, mask_nel)
-                for line_number, line in enumerate(document.split("\n"))
-                if line.split('\t') != COL_LABELS and line != ""
-                # TODO: @matteo @ siclemat : the condition can be broken by a annotation starting with token "TOKEN")
-            ]
-        )
-        for document in tsv_data.split("\n\n")
-    ]
-    return documents
+    if hipe_format_version == "v1":
+        documents = [
+            HipeDocument(
+                path=file_path,
+                tsv_lines=[
+                    parse_tsv_line(line, line_number, mask_nerc, mask_nel)
+                    for line_number, line in enumerate(document.split("\n"))
+                    if line.split('\t') != COL_LABELS and line != ""
+                ]
+            )
+            for document in tsv_data.split("\n\n")
+        ]
+        return documents
+    elif hipe_format_version == "v2":
+        documents = [
+            HipeDocument(
+                path=file_path,
+                tsv_lines=[
+                    parse_tsv_line(line, line_number, mask_nerc, mask_nel, hipe_format_version=hipe_format_version)
+                    for line_number, line in enumerate(document.split("\n"))
+                    if line.split('\t') != COL_LABELS_V2 and line != ""
+                ]
+            )
+            for document in tsv_data.split("\n\n")
+        ]
+        return documents
 
 
 def is_comment(line: str) -> bool:
@@ -420,12 +503,10 @@ def parse_comment(comment_line: str, line_number: int) -> TSVComment:
 
         ipdb.set_trace()
 
-    # TODO : In the current state of things, `key` and `value` might be called before declaration ⚠️ Change this.
     return TSVComment(n=line_number, field=key, value=value)
 
 
-# TODO: @matteo @siclemat is this necessary ?
-def parse_annotation(line: str, line_number: int) -> TSVAnnotation:
+def parse_annotation(line: str, line_number: int) -> TSVAnnotation:  ##TODO: add suffix _v1 if solution is retained.
     """Parses a TSV line into a `TSVAnnotation` object."""
     values = line.split("\t")
     return TSVAnnotation(
@@ -443,14 +524,37 @@ def parse_annotation(line: str, line_number: int) -> TSVAnnotation:
     )
 
 
-def parse_tsv_line(line: str, line_number: int, mask_nerc: bool = False, mask_nel: bool = False) -> TSVLine:
+def parse_annotation_v2(line: str, line_number: int) -> TSVAnnotation_v2:
+    """Parses a TSV line into a `TSVAnnotation_v2` object."""
+    values = line.split("\t")
+    return TSVAnnotation_v2(
+        n=line_number,
+        token=values[0],
+        ne_coarse_lit=values[1] if len(values) >= 2 else None,
+        ne_coarse_meto=values[2] if len(values) >= 3 else None,
+        ne_fine_lit=values[3] if len(values) >= 4 else None,
+        ne_fine_meto=values[4] if len(values) >= 5 else None,
+        ne_fine_comp=values[5] if len(values) >= 6 else None,
+        ne_nested=values[6] if len(values) >= 7 else None,
+        nel_lit=values[7] if len(values) >= 8 else None,
+        nel_meto=values[8] if len(values) >= 9 else None,
+        render=values[9] if len(values) >= 10 else None,
+        seg=values[10] if len(values) >= 11 else None,
+        ocr_info=values[11] if len(values) >= 12 else None,
+        misc=values[12] if len(values) >= 13 else None,
+    )
+
+
+def parse_tsv_line(line: str, line_number: int, mask_nerc: bool = False, mask_nel: bool = False,
+                   hipe_format_version="v1") -> TSVLine:
     """General parser for tsv lines, leveraging `parse_comment` and `parse_annotation` for annotations
     and commented lines respectively."""
 
     if is_comment(line):
         return parse_comment(line, line_number)
     else:
-        ann = parse_annotation(line, line_number)
+        ann = parse_annotation(line, line_number) if hipe_format_version == "v1" else parse_annotation_v2(line,
+                                                                                                          line_number)
         if mask_nerc and mask_nel:
             return mask_all_groundtruth(ann)
         elif mask_nel and not mask_nerc:
@@ -505,19 +609,28 @@ def mask_nel_groundtruth(annotation: TSVAnnotation, mask: str = "_") -> TSVAnnot
     return masked_annotation
 
 
-def write_tsv(documents: List[List[TSVLine]], output_path: str) -> None:
-    headers = COL_LABELS
+def write_tsv(documents: List[List[TSVLine]], output_path: str, hipe_format_version: str = "v1") -> None:
+    """
+    Write TSVlines to .tsv file, with appropriate hipe headers.
+    :param  List[List[TSVLine]] documents: HIPE formatted document lines
+    :param str output_path: the file where the data will be written
+    :param hipe_format_v: which version of hipe format to serialise to. "v1" (default) or "v2"
+    :rtype: object
+    """
+    headers = COL_LABELS if hipe_format_version == "v1" else COL_LABELS_V2
     raw_csv = "\n\n".join(
         ("\n".join((str(line) for line in document)) for document in documents)
     )
     headers_line = "\t".join(headers)
-    csv_content = f"{headers_line}\n{raw_csv}\n"
+    preamble = headers_line if hipe_format_version == "v1" else f"{headers_line}\n{IOB_FIRST_LINE}"
+    csv_content = f"{preamble}\n{raw_csv}\n"
 
     with io.open(output_path, "w", encoding="utf-8") as f:
         f.write(csv_content)
 
 
-def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comments: bool = False) -> Dict[str, List[str]]:
+def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comments: bool = False) -> Dict[
+    str, List[str]]:
     """The simplest and most straightforward way to get tsv-data into a python structure. This function is used as the
     basis for other converters"""
 
@@ -530,7 +643,7 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
         for i, line in enumerate(data[1:]):  # As data[0] is the header
             if line and not line.startswith('#'):
                 line = line.split('\t')
-                dict_['n'].append(i+1)  # as we are starting with data[1:]
+                dict_['n'].append(i + 1)  # as we are starting with data[1:]
                 for j, k in enumerate(header):
                     dict_[k].append(line[j])
             else:
@@ -542,7 +655,7 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
         for i, line in enumerate(data[1:]):  # As data[0] is the header
 
             if line:
-                parsed_line = parse_tsv_line(line, i+1)
+                parsed_line = parse_tsv_line(line, i + 1)
 
                 if isinstance(parsed_line, TSVComment):  # If comment, stock comment's field and value
                     comments[parsed_line.field] = parsed_line.value
@@ -555,10 +668,11 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
                             getattr(parsed_line, formated_k)
                             if formated_k in parsed_line._fields else comments[k])
 
-
     return dict_
 
-def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None, keep_comments:bool=False) -> pd.DataFrame:
+
+def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None,
+                     keep_comments: bool = False) -> pd.DataFrame:
     """Converts a HIPE-compliant tsv to a `pd.DataFrame`, keeping comment fields as columns.
 
     Each row corresponds to an annotation row of the tsv (i.e. a token). Commented fields (e.g. `'document_id`) are
@@ -772,6 +886,3 @@ def get_unique_labels(path: Optional[str] = None, url: Optional[str] = None, lab
         labels.append('I-' + label)
 
     return labels
-
-
-
