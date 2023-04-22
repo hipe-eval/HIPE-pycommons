@@ -4,6 +4,7 @@ import urllib.request
 from typing import Set, List, Union, NamedTuple, Dict, Optional
 import pandas as pd
 from dataclasses import dataclass
+import dataclasses
 
 # ======================================================================================================================
 #                                                       VARIABLES
@@ -629,10 +630,15 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str, hipe_format_vers
         f.write(csv_content)
 
 
-def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comments: bool = False) -> Dict[
+def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comments: bool = False,
+                hipe_format_version: str = "v1") -> Dict[
     str, List[str]]:
     """The simplest and most straightforward way to get tsv-data into a python structure. This function is used as the
-    basis for other converters"""
+    basis for other converters
+    :param path:
+    :param keep_comments:
+    :param url:
+    :param hipe_format_version: """
 
     data = get_tsv_data(path, url).split('\n')
     header = data[0].split('\t')
@@ -655,7 +661,7 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
         for i, line in enumerate(data[1:]):  # As data[0] is the header
 
             if line:
-                parsed_line = parse_tsv_line(line, i + 1)
+                parsed_line = parse_tsv_line(line, i + 1, hipe_format_version=hipe_format_version)
 
                 if isinstance(parsed_line, TSVComment):  # If comment, stock comment's field and value
                     comments[parsed_line.field] = parsed_line.value
@@ -664,15 +670,21 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
                     dict_ = {k: [] for k in ['n'] + header + list(comments.keys())} if not dict_ else dict_
                     for k in dict_.keys():
                         formated_k = k.lower().replace('-', '_')
-                        dict_[k].append(
-                            getattr(parsed_line, formated_k)
-                            if formated_k in parsed_line._fields else comments[k])
+                        if hipe_format_version == "v1":
+                            dict_[k].append(
+                                getattr(parsed_line, formated_k)
+                                if formated_k in parsed_line._fields else comments[k])
+                        elif hipe_format_version == "v2":
+                            dict_[k].append(
+                                getattr(parsed_line, formated_k)
+                                if formated_k in [f.name for f in dataclasses.fields(parsed_line)] else comments[k])
 
     return dict_
 
 
 def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None,
-                     keep_comments: bool = False) -> pd.DataFrame:
+                     keep_comments: bool = False,
+                     hipe_format_version: str = "v1") -> pd.DataFrame:
     """Converts a HIPE-compliant tsv to a `pd.DataFrame`, keeping comment fields as columns.
 
     Each row corresponds to an annotation row of the tsv (i.e. a token). Commented fields (e.g. `'document_id`) are
@@ -681,16 +693,22 @@ def tsv_to_dataframe(path: Optional[str] = None, url: Optional[str] = None,
     ..note:: In the output-dataframe, column 'n' corresponds to the line number in the original tsv file, not in the
     dataframe.
 
+    :param hipe_format_version:
+    :param keep_comments:
     :param str path: Path to a HIPE-compliant tsv file
     :param str url: url to a HIPE-compliant tsv file
     """
-    return pd.DataFrame(tsv_to_dict(path=path, url=url, keep_comments=keep_comments))
+    return pd.DataFrame(tsv_to_dict(path=path,
+                                    url=url,
+                                    keep_comments=keep_comments,
+                                    hipe_format_version=hipe_format_version))
 
 
 def tsv_to_segmented_lists(labels: List[str],
                            path: Optional[str] = None,
                            url: Optional[str] = None,
-                           segmentation_flag: Union[str, int] = 'EndOf') -> Dict[str, List[List[str]]]:
+                           segmentation_flag: Union[str, int] = 'EndOf',
+                           hipe_format_version: str = "v1" ) -> Dict[str, List[List[str]]]:
     """Converts a HIPE-compliant tsv to lists of examples containing lists of tokens,
     with their aligned labels and doc_ids.
 
@@ -710,8 +728,7 @@ def tsv_to_segmented_lists(labels: List[str],
 
     :returns: Dict, see above
     """
-
-    df = tsv_to_dataframe(path=path, url=url, keep_comments=True)
+    df = tsv_to_dataframe(path=path, url=url, keep_comments=True, hipe_format_version=hipe_format_version)
     d = {k: [] for k in ['texts', 'doc_ids'] + labels}
 
     doc_id_col = [col for col in df.columns if 'document_id' in col][0]
@@ -726,7 +743,8 @@ def tsv_to_segmented_lists(labels: List[str],
         for label in labels:
             example_labels[label].append(df[label][i])
 
-        if segmentation_flag in df['MISC'][i]:
+        if (hipe_format_version == "v1" and segmentation_flag in df['MISC'][i]) \
+            or (hipe_format_version == "v2" and segmentation_flag in {df['RENDER'][i], df['SEG'][i]}):
             d['texts'].append(example_tokens)
             d['doc_ids'].append(example_doc_ids)
             for label in labels:
