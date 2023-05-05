@@ -2,13 +2,13 @@ import pandas as pd
 from typing import Dict
 from collections import Counter
 from typing import List, Dict
-from .helpers.tsv import HipeDocument, parse_tsv, ENTITY_TYPES
+from .helpers.tsv import HipeDocument, parse_tsv, NE_ANNOTATION_TYPES
 
 def count_entities(docs: List[HipeDocument]) -> Dict:
 
     counts = {}
     
-    for e_type in ENTITY_TYPES:
+    for e_type in NE_ANNOTATION_TYPES:
         for doc in docs:
             if e_type in doc.entities:
                 if e_type not in counts:
@@ -21,7 +21,7 @@ def count_entities(docs: List[HipeDocument]) -> Dict:
 def compute_entities_stats(docs: List[HipeDocument]) -> Dict[str, pd.DataFrame]:
     counts = {}
     
-    for e_type in ENTITY_TYPES:
+    for e_type in NE_ANNOTATION_TYPES:
         for doc in docs:
             if e_type in doc.entities:
                 if e_type not in counts:
