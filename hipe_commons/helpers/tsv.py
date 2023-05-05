@@ -623,7 +623,7 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str, hipe_format_vers
         ("\n".join((str(line) for line in document)) for document in documents)
     )
     headers_line = "\t".join(headers)
-    preamble = headers_line if hipe_format_version == "v1" else f"{headers_line}\n{IOB_FIRST_LINE}"
+    preamble = headers_line if hipe_format_version == "v1" else f"{IOB_FIRST_LINE}"
     csv_content = f"{preamble}\n{raw_csv}\n"
 
     with io.open(output_path, "w", encoding="utf-8") as f:
