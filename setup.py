@@ -24,8 +24,8 @@ setup(
         "stringdist"
     ],
     extras_require = {
-        'HF': '',
-        'torch': ''
+        'huggingface': 'datasets',
+        'torch': 'torch'
     }
     long_description=read("README.md"),
     long_description_content_type='text/markdown'
