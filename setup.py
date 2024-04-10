@@ -9,7 +9,7 @@ def read(fname):
 setup(
     name="hipe_commons",
     url="https://github.com/hipe-eval/HIPE-pycommons",
-    version="0.3.0",
+    version="0.4.0",
     packages=find_packages(),
     classifiers=[
         "Intended Audience :: Science/Research",
@@ -23,6 +23,10 @@ setup(
         "tabulate",
         "stringdist"
     ],
+    extras_require = {
+        'HF': '',
+        'torch': ''
+    }
     long_description=read("README.md"),
     long_description_content_type='text/markdown'
 )
