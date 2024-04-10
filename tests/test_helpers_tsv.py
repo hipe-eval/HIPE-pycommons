@@ -52,10 +52,10 @@ def test_tsv_to_lists(sample_tsv_url, sample_tsv_string, sample_label):
 
 
 def test_tsv_to_lists_v2(sample_tsv_path_v2, sample_label):
-    d = tsv_to_segmented_lists([sample_label], path=sample_tsv_path_v2, hipe_format_version="v2")
+    data = tsv_to_segmented_lists([sample_label], path=sample_tsv_path_v2, hipe_format_version="v2")
     sample_tsv_string = open(sample_tsv_path_v2).read()
     segmentation_flag_count = sum([1 for l in sample_tsv_string.split('\n') if 'EndOf' in l])
-    assert len(d['texts']) in [segmentation_flag_count,
+    assert len(data['texts']) in [segmentation_flag_count,
                                segmentation_flag_count + 1]  # In case the file doesn't end with flag.
 
 

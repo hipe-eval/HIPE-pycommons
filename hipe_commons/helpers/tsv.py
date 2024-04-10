@@ -743,8 +743,9 @@ def tsv_to_segmented_lists(labels: List[str],
         for label in labels:
             example_labels[label].append(df[label][i])
 
+        # TODO: add a brief explanation of what's checking
         if (hipe_format_version == "v1" and segmentation_flag in df['MISC'][i]) \
-            or (hipe_format_version == "v2" and segmentation_flag in {df['RENDER'][i], df['SEG'][i]}):
+            or (hipe_format_version == "v2" and (segmentation_flag in  df['SEG'][i]) or segmentation_flag in df['RENDER'][i]):
             d['texts'].append(example_tokens)
             d['doc_ids'].append(example_doc_ids)
             for label in labels:
