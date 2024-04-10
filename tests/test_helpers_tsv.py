@@ -31,17 +31,23 @@ def test_parse_tsv_from_url(sample_tsv_url):
 
 def test_tsv_to_dataframe(sample_tsv_url, sample_tsv_string):
     df = tsv_to_dataframe(url=sample_tsv_url)
+    tsv_lines = [line for line in sample_tsv_string.split('\n') if (not line.startswith('#')) and line.strip('\n')]
+    
     # Make sure there are as many annotation row in the file as there are rows in the df
-    assert len(df) + 1 == len(
-        [1 for line in sample_tsv_string.split('\n') if (not line.startswith('#')) and line.strip('\n')])
+    # NOTE: the `+1` is needed as in HIPE format v1 the TSV header
+    # is not commented out and is therefore pickped up in `tsv_lines` above
+    assert len(df) + 1 == len(tsv_lines)
 
 
 def test_tsv_to_dataframe_v2(sample_tsv_path_v2):
     df = tsv_to_dataframe(path=sample_tsv_path_v2, hipe_format_version="v2")
-    # Make sure there are as many annotation row in the file as there are rows in the df
     sample_tsv_string = open(sample_tsv_path_v2).read()
-    assert len(df) + 1 == len(
-        [1 for line in sample_tsv_string.split('\n') if (not line.startswith('#')) and line.strip('\n')])
+    tsv_lines = [line for line in sample_tsv_string.split('\n') if (not line.startswith('#')) and line.strip('\n')]
+    
+    # Make sure there are as many annotation row in the file as there are rows in the df
+    # NOTE: the `+1` is *not* needed here as in HIPE format v2 the TSV header
+    # is commented out and is therefore not pickped up in `tsv_lines` above
+    assert len(df) == len(tsv_lines)
 
 
 def test_tsv_to_lists(sample_tsv_url, sample_tsv_string, sample_label):
