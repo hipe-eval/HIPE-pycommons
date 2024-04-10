@@ -641,7 +641,14 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
     :param hipe_format_version: """
 
     data = get_tsv_data(path, url).split('\n')
-    header = data[0].split('\t')
+    
+    # NOTE: the logic to get column headers is different in
+    # format v1 as opposed to v2, where all headers are contained in
+    # the #global.columns line
+    if hipe_format_version == "v1":
+        header = data[0].split('\t')
+    elif hipe_format_version == "v2":
+        header = data[0].split('=')[-1].split()
 
     if not keep_comments:
         dict_ = {k: [] for k in ['n'] + header}
@@ -668,6 +675,7 @@ def tsv_to_dict(path: Optional[str] = None, url: Optional[str] = None, keep_comm
 
                 else:  # else, appends annotations and comments values to `dict_`
                     dict_ = {k: [] for k in ['n'] + header + list(comments.keys())} if not dict_ else dict_
+                    #import ipdb; ipdb.set_trace()
                     for k in dict_.keys():
                         formated_k = k.lower().replace('-', '_')
                         if hipe_format_version == "v1":
@@ -743,9 +751,9 @@ def tsv_to_segmented_lists(labels: List[str],
         for label in labels:
             example_labels[label].append(df[label][i])
 
-        # TODO: add a brief explanation of what's checking
+        # NOTE check if a sentence break should be added after the current token
         if (hipe_format_version == "v1" and segmentation_flag in df['MISC'][i]) \
-            or (hipe_format_version == "v2" and (segmentation_flag in  df['SEG'][i]) or segmentation_flag in df['RENDER'][i]):
+            or (hipe_format_version == "v2" and (segmentation_flag in  df['SEG'][i] or segmentation_flag in df['RENDER'][i])):
             d['texts'].append(example_tokens)
             d['doc_ids'].append(example_doc_ids)
             for label in labels:

@@ -51,9 +51,9 @@ def test_tsv_to_dataframe_v2(sample_tsv_path_v2):
 
 
 def test_tsv_to_lists(sample_tsv_url, sample_tsv_string, sample_label):
-    d = tsv_to_segmented_lists([sample_label], url=sample_tsv_url)
+    lists = tsv_to_segmented_lists([sample_label], url=sample_tsv_url)
     segmentation_flag_count = sum([1 for l in sample_tsv_string.split('\n') if 'EndOf' in l])
-    assert len(d['texts']) in [segmentation_flag_count,
+    assert len(lists['texts']) in [segmentation_flag_count,
                                segmentation_flag_count + 1]  # In case the file doesn't end with flag.
 
 
