@@ -26,7 +26,7 @@ setup(
     extras_require = {
         'huggingface': 'datasets',
         'torch': 'torch'
-    }
+    },
     long_description=read("README.md"),
     long_description_content_type='text/markdown'
 )
