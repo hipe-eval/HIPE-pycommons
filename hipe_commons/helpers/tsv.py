@@ -252,7 +252,7 @@ class HipeDocument(object):
 #                                                       HELPER FUNCTIONS
 # ======================================================================================================================
 
-def lines2entity(tsv_lines: List[TSVLine], entity_type: str, hipe_format_version="v1") -> HipeEntity:
+def lines2entity(tsv_lines: List[TSVLine | TSVLine_v2], entity_type: str, hipe_format_version="v1") -> HipeEntity:
     """Converts a group of TSV lines into a `HipeEntity` object.
 
     :param tsv_lines: List of TSV lines corresponding to a token-based representation of an entity.
@@ -269,9 +269,9 @@ def lines2entity(tsv_lines: List[TSVLine], entity_type: str, hipe_format_version
     surface_form = ""
     for line in tsv_lines:
         surface_form += line.token
-        if hipe_format_version == "v1" and not "NoSpaceAfter" in line.misc:
+        if hipe_format_version == "v1" and NO_SPACE_AFTER_FLAG not in line.misc:
             surface_form += " "
-        if hipe_format_version == "v2" and not "NoSpaceAfter" in line.render:
+        if hipe_format_version == "v2" and NO_SPACE_AFTER_FLAG not in line.render:
             surface_form += " "
 
     # keep track of the TSV line numbers over which the entity spans.
@@ -461,7 +461,7 @@ def parse_tsv(mask_nerc: bool = False, mask_nel: bool = False, hipe_format_versi
             HipeDocument(
                 path=file_path,
                 tsv_lines=[
-                    parse_tsv_line(line, line_number, mask_nerc, mask_nel)
+                    parse_tsv_line(line, line_number, mask_nerc, mask_nel, hipe_format_version=hipe_format_version)
                     for line_number, line in enumerate(document.split("\n"))
                     if line.split('\t') != COL_LABELS and line != ""
                 ]
@@ -550,7 +550,6 @@ def parse_tsv_line(line: str, line_number: int, mask_nerc: bool = False, mask_ne
                    hipe_format_version="v1") -> TSVLine:
     """General parser for tsv lines, leveraging `parse_comment` and `parse_annotation` for annotations
     and commented lines respectively."""
-
     if is_comment(line):
         return parse_comment(line, line_number)
     else:
@@ -633,12 +632,12 @@ def write_tsv(documents: List[List[TSVLine]], output_path: str, hipe_format_vers
     Write TSVlines to .tsv file, with appropriate hipe headers.
     :param  List[List[TSVLine]] documents: HIPE formatted document lines
     :param str output_path: the file where the data will be written
-    :param hipe_format_v: which version of hipe format to serialise to. "v1" (default) or "v2"
+    :param hipe_format_version: which version of hipe format to serialise to. "v1" (default) or "v2"
     :rtype: object
     """
     headers = COL_LABELS if hipe_format_version == "v1" else COL_LABELS_V2
     raw_csv = "\n\n".join(
-        ("\n".join((str(line) for line in document._tsv_lines)) for document in documents)
+        ("\n".join((str(line) for line in document)) for document in documents)
     )
     headers_line = "\t".join(headers)
     preamble = headers_line if hipe_format_version == "v1" else f"{IOB_FIRST_LINE}"
@@ -771,7 +770,7 @@ def tsv_to_segmented_lists(labels: List[str],
 
         # NOTE check if a sentence break should be added after the current token
         if (hipe_format_version == "v1" and segmentation_flag in df['MISC'][i]) \
-            or (hipe_format_version == "v2" and (segmentation_flag in  df['SEG'][i] or segmentation_flag in df['RENDER'][i])):
+            or (hipe_format_version == "v2" and (segmentation_flag in df['SEG'][i] or segmentation_flag in df['RENDER'][i])):
             d['texts'].append(example_tokens)
             d['doc_ids'].append(example_doc_ids)
             for label in labels:
